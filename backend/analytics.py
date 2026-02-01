@@ -1,5 +1,5 @@
 """
-Zero Me - WandB Analytics Manager
+Zero Me - WandB Analytics Manager with Weave LLM Tracing
 Tracks parameter changes, question counts, and memory changes for continual learning
 
 All logging happens automatically when:
@@ -8,6 +8,11 @@ All logging happens automatically when:
 3. Parameters change
 4. Memory operations occur
 5. Agent calls complete
+
+Weave provides detailed tracing of:
+- LLM calls (inputs, outputs, latency, tokens)
+- Tool executions
+- Agent workflows
 """
 
 import os
@@ -22,12 +27,19 @@ except ImportError:
     WANDB_AVAILABLE = False
     logger.warning("wandb not installed. Analytics features will be disabled.")
 
+try:
+    import weave
+    WEAVE_AVAILABLE = True
+except ImportError:
+    WEAVE_AVAILABLE = False
+    logger.warning("weave not installed. LLM tracing will be disabled.")
+
 from parameters import get_all_parameters, ANALYTICS_CONFIG
 
 
 class AnalyticsManager:
     """
-    Manages WandB logging for continual learning monitoring.
+    Manages WandB logging and Weave tracing for continual learning monitoring.
     
     Tracks:
     - Parameter changes (prompts, temperatures, etc.)
@@ -36,11 +48,17 @@ class AnalyticsManager:
     - Model performance metrics
     - Session metrics
     - Topics and conversation patterns
+    
+    Weave Tracing:
+    - LLM call inputs and outputs
+    - Tool execution traces
+    - Agent workflow visualization
     """
     
     def __init__(self):
-        """Initialize WandB connection."""
+        """Initialize WandB and Weave connections."""
         self.enabled = WANDB_AVAILABLE and ANALYTICS_CONFIG["track_parameters"]
+        self.weave_enabled = WEAVE_AVAILABLE
         self.run: Optional[wandb.Run] = None
         self.session_metrics: Dict[str, Any] = {
             "total_conversations": 0,
@@ -53,6 +71,9 @@ class AnalyticsManager:
         
         if self.enabled:
             self._init_wandb()
+        
+        if self.weave_enabled:
+            self._init_weave()
     
     def _init_wandb(self):
         """Initialize WandB run."""
@@ -79,6 +100,29 @@ class AnalyticsManager:
         except Exception as e:
             logger.error(f"Failed to initialize WandB: {e}")
             self.enabled = False
+    
+    def _init_weave(self):
+        """Initialize Weave for LLM tracing."""
+        try:
+            api_key = os.getenv("WANDB_API_KEY")
+            entity = os.getenv("WANDB_ENTITY")
+            project = os.getenv("WANDB_PROJECT", ANALYTICS_CONFIG["wandb_project"])
+            
+            if not api_key:
+                logger.warning("WANDB_API_KEY not found. Weave tracing disabled.")
+                self.weave_enabled = False
+                return
+            
+            # Initialize Weave with the same project
+            # Format: entity/project or just project
+            weave_project = f"{entity}/{project}" if entity else project
+            weave.init(weave_project)
+            
+            logger.info(f"Weave initialized for project: {weave_project}")
+            logger.info("📊 View Weave traces at: https://wandb.ai/weave")
+        except Exception as e:
+            logger.error(f"Failed to initialize Weave: {e}")
+            self.weave_enabled = False
     
     def log_session_start(self, session_number: int):
         """Log the start of a new session."""
@@ -355,6 +399,106 @@ class AnalyticsManager:
             logger.info("WandB run finished successfully")
         except Exception as e:
             logger.error(f"Failed to finish WandB run: {e}")
+
+
+# ============================================
+# WEAVE TRACING DECORATORS & HELPERS
+# ============================================
+
+def weave_op(func):
+    """
+    Decorator to trace a function with Weave.
+    Use this on any function you want to track in Weave.
+    
+    Example:
+        @weave_op
+        def my_llm_call(prompt):
+            return llm.generate(prompt)
+    """
+    if WEAVE_AVAILABLE:
+        return weave.op()(func)
+    return func
+
+
+def trace_llm_call(model: str, prompt: str, response: str, metadata: Dict[str, Any] = None):
+    """
+    Manually trace an LLM call to Weave.
+    Use this for LLM calls that aren't automatically traced.
+    
+    Args:
+        model: Model name (e.g., "gemini-3-flash-preview")
+        prompt: Input prompt
+        response: Model response
+        metadata: Additional metadata (tokens, latency, etc.)
+    """
+    if not WEAVE_AVAILABLE:
+        return
+    
+    try:
+        @weave.op()
+        def _traced_llm_call(model_name: str, input_prompt: str) -> str:
+            return response
+        
+        # This creates a trace entry
+        _traced_llm_call(model, prompt)
+    except Exception as e:
+        logger.debug(f"Weave trace failed: {e}")
+
+
+def trace_tool_call(tool_name: str, inputs: Dict[str, Any], output: str, success: bool = True):
+    """
+    Manually trace a tool call to Weave.
+    
+    Args:
+        tool_name: Name of the tool
+        inputs: Tool input parameters
+        output: Tool output
+        success: Whether the call succeeded
+    """
+    if not WEAVE_AVAILABLE:
+        return
+    
+    try:
+        @weave.op()
+        def _traced_tool(name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+            return {"output": output, "success": success}
+        
+        _traced_tool(tool_name, inputs)
+    except Exception as e:
+        logger.debug(f"Weave tool trace failed: {e}")
+
+
+def trace_agent_delegation(
+    from_agent: str,
+    to_agent: str,
+    task: str,
+    result: str,
+    duration_ms: float,
+):
+    """
+    Trace an agent delegation event.
+    
+    Args:
+        from_agent: Source agent
+        to_agent: Target agent
+        task: Task description
+        result: Task result
+        duration_ms: Execution time in milliseconds
+    """
+    if not WEAVE_AVAILABLE:
+        return
+    
+    try:
+        @weave.op()
+        def _agent_delegation(source: str, target: str, task_desc: str) -> Dict[str, Any]:
+            return {
+                "result": result,
+                "duration_ms": duration_ms,
+            }
+        
+        _agent_delegation(from_agent, to_agent, task)
+    except Exception as e:
+        logger.debug(f"Weave delegation trace failed: {e}")
 
 
 # Global instance

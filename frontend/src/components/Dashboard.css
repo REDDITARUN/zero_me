@@ -146,6 +146,19 @@
   color: var(--text-muted);
 }
 
+.integration-card.connected {
+  border-color: rgba(126, 214, 165, 0.3);
+}
+
+.integration-badge {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.integration-badge.active {
+  color: var(--listening-green);
+}
+
 /* Buttons */
 .btn-secondary {
   padding: var(--spacing-xs) var(--spacing-md);

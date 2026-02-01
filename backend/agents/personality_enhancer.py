@@ -49,6 +49,14 @@ from tools.analytics_tools import (
     get_current_parameters,
     record_conversation_analytics,
 )
+from tools.prompt_tools import (
+    get_agent_prompt,
+    update_agent_prompt,
+    append_to_prompt,
+    get_all_agent_configs,
+    update_agent_temperature,
+    analyze_conversation_for_improvements,
+)
 
 
 class PersonalityEnhancerAgent:
@@ -97,17 +105,26 @@ class PersonalityEnhancerAgent:
         
         # Create tools list
         self.tools = [
+            # Memory tools
             store_memory,
             retrieve_memory,
             search_memory,
             delete_memory,
             get_conversation_history,
+            # Analytics tools
             log_metric,
             log_question_count,
             log_parameter_change,
             modify_agent_parameter,
             get_current_parameters,
             record_conversation_analytics,
+            # Prompt modification tools
+            get_agent_prompt,
+            update_agent_prompt,
+            append_to_prompt,
+            get_all_agent_configs,
+            update_agent_temperature,
+            analyze_conversation_for_improvements,
         ]
         
         # Create the agent
@@ -285,43 +302,91 @@ Conversation ended:
         """
         Check if any parameters should be updated based on observed patterns.
         
-        This implements a simple auto-tuning mechanism:
-        - If task success rate is low, increase agent temperature slightly
-        - If user asks many questions, the agent might be too brief
-        - Track patterns and suggest prompt improvements
+        This implements automatic prompt optimization:
+        - Reduce questions by adding memory-checking instructions
+        - Improve task handling based on success rates
+        - Add user-specific context to prompts
         """
-        # Only auto-tune after enough sessions
-        if self.session_count < 3:
-            logger.info("Not enough sessions for auto-tuning yet")
-            return
-        
         task_success = self.current_conversation["task_success_rate"]
         questions_asked = self.current_conversation["questions_asked"]
         tasks_delegated = self.current_conversation["tasks_delegated"]
+        memory_used = 0  # We'd track this if available
         
-        # Pattern: Low task success rate
-        if task_success < 0.7 and tasks_delegated > 0:
-            logger.warning(f"Low task success rate: {task_success:.2f}")
-            self.analytics.log_parameter_observation(
-                "task_success_rate",
-                task_success,
-                "Low success rate detected - may need prompt refinement"
-            )
-        
-        # Pattern: Many questions per task (user might be confused)
-        if tasks_delegated > 0:
-            questions_per_task = questions_asked / tasks_delegated
-            if questions_per_task > 5:
-                logger.warning(f"High questions per task: {questions_per_task:.1f}")
-                self.analytics.log_parameter_observation(
-                    "questions_per_task",
-                    questions_per_task,
-                    "High clarification rate - agent responses may need to be clearer"
-                )
+        logger.info(f"📊 Session analysis: {questions_asked} questions, {tasks_delegated} tasks, {task_success:.1%} success")
         
         # Log current parameters to WandB for tracking
         current_params = get_all_parameters()
-        self.analytics.log_parameters_snapshot(current_params)
+        if self.analytics:
+            self.analytics.log_parameters_snapshot(current_params)
+        
+        # Only auto-tune after enough sessions to gather patterns
+        if self.session_count < 2:
+            logger.info("Building baseline - auto-optimization starts after 2 sessions")
+            return
+        
+        prompt_updates = []
+        
+        # Pattern: Low task success rate - improve clarity
+        if task_success < 0.7 and tasks_delegated > 0:
+            logger.warning(f"⚠️ Low task success rate: {task_success:.2%}")
+            if self.analytics:
+                self.analytics.log_parameter_observation(
+                    "task_success_rate", task_success,
+                    "Low success rate - adding clearer task confirmation"
+                )
+            prompt_updates.append({
+                "agent": "voice_agent",
+                "section": "# Task Confirmation Protocol",
+                "content": "- Before executing tasks, repeat back the key details for confirmation\n- If task seems ambiguous, ask ONE clarifying question\n- Default to reasonable assumptions rather than asking multiple questions",
+                "reason": f"Low task success rate ({task_success:.0%}) - adding confirmation step"
+            })
+        
+        # Pattern: Too many questions asked - improve memory usage
+        if questions_asked > 3 and tasks_delegated > 0:
+            questions_per_task = questions_asked / tasks_delegated
+            if questions_per_task > 2:
+                logger.warning(f"⚠️ High questions per task: {questions_per_task:.1f}")
+                if self.analytics:
+                    self.analytics.log_parameter_observation(
+                        "questions_per_task", questions_per_task,
+                        "Reducing unnecessary questions"
+                    )
+                prompt_updates.append({
+                    "agent": "voice_agent",
+                    "section": "# Memory-First Approach",
+                    "content": "- ALWAYS check memory first using recall_info before asking the user questions\n- Use stored preferences and context to fill in missing details\n- Only ask questions when information truly cannot be inferred",
+                    "reason": f"High question rate ({questions_per_task:.1f}/task) - prioritizing memory access"
+                })
+        
+        # Pattern: No memory usage despite available context
+        if questions_asked > 2 and memory_used == 0:
+            prompt_updates.append({
+                "agent": "main_agent",
+                "section": "# Context Awareness",
+                "content": "- Before processing any task, instruct sub-agents to check memory\n- Pass relevant context to sub-agents when delegating\n- Reduce back-and-forth by providing complete information",
+                "reason": "Improving context utilization across agents"
+            })
+        
+        # Apply prompt updates using the agent's tools
+        for update in prompt_updates:
+            try:
+                logger.info(f"📝 Updating {update['agent']} prompt: {update['section']}")
+                
+                # Use the append_to_prompt tool
+                result = append_to_prompt.invoke({
+                    "agent_name": update["agent"],
+                    "section_title": update["section"],
+                    "content": update["content"],
+                    "reason": update["reason"]
+                })
+                
+                logger.info(f"   Result: {result}")
+                
+            except Exception as e:
+                logger.warning(f"   Could not update prompt: {e}")
+        
+        if not prompt_updates:
+            logger.info("✅ No prompt optimizations needed this session")
     
     async def analyze_and_store_context(
         self,

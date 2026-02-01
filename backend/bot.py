@@ -36,7 +36,7 @@ from parameters import VOICE_AGENT_SYSTEM_PROMPT, VOICE_AGENT_CONFIG
 # Import agent system
 from agents.main_agent import get_main_agent
 from agents.personality_enhancer import get_personality_enhancer
-from analytics import get_analytics_manager
+from analytics import get_analytics_manager, trace_tool_call, trace_agent_delegation
 from memory import get_memory_manager
 
 # Default user ID
@@ -91,6 +91,15 @@ class VoiceAgentBridge:
         if self.personality_enhancer:
             self.personality_enhancer.start_conversation()
         self.conversation_text = []
+        
+        # Broadcast session start for frontend visualization
+        try:
+            from tool_status import get_tool_status_broadcaster
+            broadcaster = get_tool_status_broadcaster()
+            broadcaster.start_session(self.conversation_id)
+        except Exception as e:
+            logger.debug(f"Tool status broadcast not available: {e}")
+        
         logger.info(f"📞 New conversation started: {self.conversation_id}")
     
     def record_user_message(self, text: str):
@@ -291,6 +300,14 @@ class VoiceAgentBridge:
             logger.info("✅ Session processing complete - Ready for next conversation")
             logger.info("=" * 60)
             
+            # Broadcast session end for frontend visualization
+            try:
+                from tool_status import get_tool_status_broadcaster
+                broadcaster = get_tool_status_broadcaster()
+                broadcaster.end_session()
+            except Exception as e:
+                logger.debug(f"Tool status broadcast not available: {e}")
+            
         except Exception as e:
             logger.error(f"❌ Error during session end processing: {e}")
             import traceback
@@ -378,11 +395,33 @@ Examples:
     required=[]
 )
 
-# Create tools schema with all three tools
+# Tool 4: See screen (visual intelligence)
+see_screen_schema = FunctionSchema(
+    name="see_screen",
+    description="""Capture and analyze what's currently visible on the user's screen.
+Use this when the user asks about what they're seeing or needs help with something visual.
+
+Use for:
+- "What's on my screen?" → see_screen(task="describe what you see")
+- "Can you read this?" → see_screen(task="read and extract the text")
+- "Translate this" → see_screen(task="translate the visible text")
+- "What error is showing?" → see_screen(task="identify and explain the error")
+- "Help me with this form" → see_screen(task="describe the form and guide me")""",
+    properties={
+        "task": {
+            "type": "string",
+            "description": "What to analyze or look for (e.g., 'describe what you see', 'translate the text', 'read the error message')"
+        }
+    },
+    required=["task"]
+)
+
+# Create tools schema with all four tools
 tools = ToolsSchema(standard_tools=[
     delegate_task_schema,
     remember_info_schema,
-    recall_info_schema
+    recall_info_schema,
+    see_screen_schema
 ])
 
 
@@ -410,9 +449,17 @@ When the user asks what you know or references past info:
 - "What do you know about me?" → recall_info()
 - "What did I tell you about work?" → recall_info(search_query="work")
 
+## 4. see_screen
+When the user asks about what's on their screen or needs visual help:
+- "What am I looking at?" → see_screen(task="describe what you see")
+- "Can you translate this?" → see_screen(task="translate the visible text")
+- "What error is this?" → see_screen(task="identify and explain the error")
+- "Help me fill this form" → see_screen(task="describe the form fields")
+
 IMPORTANT:
 - When someone tells you something personal, USE remember_info immediately
 - When someone asks what you remember, USE recall_info
+- When someone asks about their screen, USE see_screen
 - DO NOT just say "I'll remember that" - actually call remember_info!
 """
 
@@ -447,6 +494,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     
     async def handle_delegate_task(params: FunctionCallParams):
         """Handle the delegate_task function call from Gemini."""
+        import time as _time
+        start_time = _time.time()
+        
         task_description = params.arguments.get("task_description", "")
         task_type = params.arguments.get("task_type", "general")
         
@@ -464,7 +514,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         result = await voice_bridge.delegate_task(task_description, task_type)
         await params.result_callback(result)
         
+        duration_ms = (_time.time() - start_time) * 1000
         print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
+        print(f"{CYAN}║  ⏱️  Duration: {duration_ms:.0f}ms{RESET}")
+        
+        # Trace to Weave
+        trace_tool_call(
+            tool_name="delegate_task",
+            inputs={"task_description": task_description, "task_type": task_type},
+            output=result.get("result", ""),
+            success="error" not in result.get("result", "").lower()
+        )
     
     async def handle_remember_info(params: FunctionCallParams):
         """Handle the remember_info function call from Gemini."""
@@ -486,6 +546,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await params.result_callback(result)
         
         print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
+        
+        # Trace to Weave
+        trace_tool_call(
+            tool_name="remember_info",
+            inputs={"key": key, "value": value},
+            output=result.get("result", ""),
+            success="error" not in result.get("result", "").lower()
+        )
     
     async def handle_recall_info(params: FunctionCallParams):
         """Handle the recall_info function call from Gemini."""
@@ -507,11 +575,55 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await params.result_callback(result)
         
         print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
+        
+        # Trace to Weave
+        trace_tool_call(
+            tool_name="recall_info",
+            inputs={"key": key, "search_query": search_query},
+            output=result.get("result", ""),
+            success="error" not in result.get("result", "").lower()
+        )
     
+    async def handle_see_screen(params: FunctionCallParams):
+        """Handle the see_screen function call from Gemini."""
+        task = params.arguments.get("task", "describe what you see")
+        
+        # Green for vision operations
+        GREEN = "\033[1;32m"
+        CYAN = "\033[1;36m"
+        RESET = "\033[0m"
+        
+        print(f"\n{GREEN}╔══════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{GREEN}║  👁️ FUNCTION CALL: see_screen{RESET}")
+        print(f"{GREEN}║  📋 Task: {task[:60]}...{RESET}")
+        print(f"{GREEN}╚══════════════════════════════════════════════════════════╝{RESET}")
+        
+        try:
+            from tools.vision_tools import see_screen
+            result_text = see_screen.invoke({"task": task})
+            result = {"result": result_text}
+            success = True
+        except Exception as e:
+            logger.error(f"See screen failed: {e}")
+            result = {"result": f"I'm having trouble seeing your screen right now: {str(e)}"}
+            success = False
+        
+        await params.result_callback(result)
+        print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
+        
+        # Trace to Weave
+        trace_tool_call(
+            tool_name="see_screen",
+            inputs={"task": task},
+            output=result.get("result", ""),
+            success=success
+        )
+
     # Register all function handlers
     llm.register_function("delegate_task", handle_delegate_task, cancel_on_interruption=False)
     llm.register_function("remember_info", handle_remember_info, cancel_on_interruption=False)
     llm.register_function("recall_info", handle_recall_info, cancel_on_interruption=False)
+    llm.register_function("see_screen", handle_see_screen, cancel_on_interruption=False)
     
     logger.info("✅ All functions registered")
 

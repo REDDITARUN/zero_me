@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from parameters import MAIN_AGENT_CONFIG, MAIN_AGENT_SYSTEM_PROMPT
-from analytics import get_analytics_manager
+from analytics import get_analytics_manager, weave_op, trace_agent_delegation
 
 # Import sub-agents
 from agents.sub_agents import (
@@ -259,6 +259,7 @@ class MainDispatcherAgent:
         Returns:
             Result from the sub-agent
         """
+        start_time = time.time()
         try:
             logger.info(f"Dispatching task: {task[:100]}...")
             
@@ -272,7 +273,18 @@ class MainDispatcherAgent:
             else:
                 output = "Task completed but no output returned."
             
-            logger.info(f"Task completed: {output[:100]}...")
+            duration_ms = (time.time() - start_time) * 1000
+            logger.info(f"Task completed in {duration_ms:.0f}ms: {output[:100]}...")
+            
+            # Trace to Weave
+            trace_agent_delegation(
+                from_agent="voice_agent",
+                to_agent="main_dispatcher",
+                task=task,
+                result=output,
+                duration_ms=duration_ms,
+            )
+            
             return output
             
         except Exception as e:

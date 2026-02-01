@@ -58,6 +58,22 @@ redis>=5.0.0
 # Weights & Biases for continual learning monitoring
 wandb>=0.18.0
 
+# Weave for LLM tracing and evaluation
+weave>=0.51.0
+
+# ============================================
+# VISUAL INTELLIGENCE
+# ============================================
+
+# Screen capture for visual analysis
+pyautogui>=0.9.54
+
+# Image processing
+Pillow>=10.0.0
+
+# Google GenerativeAI for vision
+google-generativeai>=0.8.0
+
 # ============================================
 # UTILITIES
 # ============================================
