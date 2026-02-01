@@ -16,13 +16,16 @@ import os
 import subprocess
 import sys
 import threading
+import asyncio
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import httpx
 from dotenv import load_dotenv
 from loguru import logger
+
+from tool_status import get_tool_status_broadcaster
 
 load_dotenv(".env.local")
 
@@ -192,6 +195,75 @@ async def health():
     return {"status": "ok", "service": "zero-me-local", "mode": "development"}
 
 
+@app.get("/status/stream")
+async def status_stream():
+    """
+    Server-Sent Events endpoint for real-time tool status updates.
+    Frontend connects here to receive live architecture flow visualization.
+    """
+    async def event_generator():
+        broadcaster = get_tool_status_broadcaster()
+        queue = broadcaster.subscribe()
+        
+        try:
+            # Send initial state
+            initial_data = {
+                "type": "init",
+                "timestamp": datetime.now().timestamp(),
+                "data": {
+                    "architecture": broadcaster.get_architecture(),
+                    "stats": broadcaster.get_current_stats(),
+                    "recent_calls": broadcaster.get_recent_calls(10)
+                }
+            }
+            yield f"data: {__import__('json').dumps(initial_data)}\n\n"
+            
+            # Stream updates
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {__import__('json').dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive
+                    yield f": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            broadcaster.unsubscribe(queue)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@app.get("/status/architecture")
+async def get_architecture():
+    """Get the agent architecture configuration for visualization."""
+    broadcaster = get_tool_status_broadcaster()
+    return broadcaster.get_architecture()
+
+
+@app.get("/status/stats")
+async def get_stats():
+    """Get current session statistics."""
+    broadcaster = get_tool_status_broadcaster()
+    stats = broadcaster.get_current_stats()
+    return stats if stats else {"message": "No active session"}
+
+
+@app.get("/status/recent")
+async def get_recent_calls():
+    """Get recent tool calls."""
+    broadcaster = get_tool_status_broadcaster()
+    return broadcaster.get_recent_calls(20)
+
+
 @app.get("/")
 async def root():
     """Root endpoint with API info"""
@@ -202,6 +274,10 @@ async def root():
         "endpoints": {
             "/connect": "POST - Create a new voice session (local)",
             "/health": "GET - Health check",
+            "/status/stream": "GET - SSE stream for real-time tool status",
+            "/status/architecture": "GET - Agent architecture config",
+            "/status/stats": "GET - Current session stats",
+            "/status/recent": "GET - Recent tool calls",
         }
     }
 
