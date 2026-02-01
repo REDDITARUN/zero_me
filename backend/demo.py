@@ -67,10 +67,13 @@ You are interacting with the user via voice, and must apply the following rules 
 
 server = AgentServer()
 
+
 def prewarm(proc: JobProcess):
     proc.userdata["vad"] = silero.VAD.load()
 
+
 server.setup_fnc = prewarm
+
 
 @server.rtc_session(agent_name="Casey-160")
 async def entrypoint(ctx: JobContext):
@@ -80,7 +83,7 @@ async def entrypoint(ctx: JobContext):
         tts=inference.TTS(
             model="cartesia/sonic-3",
             voice="a167e0f3-df7e-4d52-a9c3-f949145efdab",
-            language="en"
+            language="en",
         ),
         turn_detection=MultilingualModel(),
         vad=ctx.proc.userdata["vad"],
@@ -92,7 +95,9 @@ async def entrypoint(ctx: JobContext):
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC(),
+                noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
+                if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                else noise_cancellation.BVC(),
             ),
         ),
     )

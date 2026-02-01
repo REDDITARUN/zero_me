@@ -6,6 +6,8 @@
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  overflow: visible; /* Allow particles to extend beyond */
+  -webkit-app-region: drag; /* Allow dragging */
 }
 
 .blob-particles,

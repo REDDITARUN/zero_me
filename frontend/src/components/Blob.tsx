@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { AgentStatus } from '../context/AgentContext';
 import './Blob.css';
 
@@ -12,12 +12,15 @@ interface Particle {
   id: number;
   x: number;
   y: number;
+  z: number; // For 3D effect
   vx: number;
   vy: number;
+  vz: number;
   size: number;
   opacity: number;
   color: { r: number; g: number; b: number };
   life: number;
+  sparkle: number; // Glitter effect
 }
 
 interface Ripple {
@@ -32,44 +35,40 @@ interface ColorSet {
   gradient: [string, string, string];
 }
 
-// Color presets for each state
+// Simplified color scheme
 const COLOR_PRESETS: Record<string, ColorSet> = {
-  idle: {
-    primary: { r: 245, g: 168, b: 154 },     // Warm coral
+  // Coral - idle, connecting, listening
+  coral: {
+    primary: { r: 245, g: 168, b: 154 },
     secondary: { r: 252, g: 213, b: 207 },
     gradient: ['#fcd5cf', '#f5a89a', '#e8826f'],
   },
-  connecting: {
-    primary: { r: 245, g: 213, b: 168 },     // Warm amber
-    secondary: { r: 250, g: 230, b: 200 },
-    gradient: ['#fae6c8', '#f5d5a8', '#f0c88a'],
+  // Blue - agent speaking
+  blue: {
+    primary: { r: 130, g: 180, b: 245 },
+    secondary: { r: 170, g: 210, b: 255 },
+    gradient: ['#aad2ff', '#82b4f5', '#5a96e8'],
   },
-  listening: {
-    primary: { r: 126, g: 214, b: 165 },     // Warm green
-    secondary: { r: 168, g: 230, b: 195 },
-    gradient: ['#a8e6c3', '#7ed6a5', '#5cc88a'],
-  },
-  thinking: {
-    primary: { r: 180, g: 170, b: 245 },     // Light purple
-    secondary: { r: 210, g: 200, b: 255 },
-    gradient: ['#d2ccff', '#b4aaf5', '#9a8ce8'],
-  },
-  speaking: {
-    primary: { r: 168, g: 130, b: 245 },     // Vibrant purple
-    secondary: { r: 198, g: 170, b: 255 },
-    gradient: ['#c6aaff', '#a882f5', '#8a5ce8'],
-  },
-  paused: {
-    primary: { r: 200, g: 200, b: 200 },     // Gray
-    secondary: { r: 230, g: 230, b: 230 },
-    gradient: ['#e6e6e6', '#c8c8c8', '#aaaaaa'],
-  },
-  error: {
-    primary: { r: 245, g: 130, b: 130 },     // Red
-    secondary: { r: 255, g: 180, b: 180 },
-    gradient: ['#ffb4b4', '#f58282', '#e85c5c'],
+  // Gray - paused
+  gray: {
+    primary: { r: 180, g: 180, b: 185 },
+    secondary: { r: 210, g: 210, b: 215 },
+    gradient: ['#d6d6db', '#b4b4b9', '#9a9a9f'],
   },
 };
+
+// Get color preset based on status
+function getColorPreset(status: AgentStatus): ColorSet {
+  switch (status) {
+    case 'speaking':
+    case 'thinking':
+      return COLOR_PRESETS.blue;
+    case 'paused':
+      return COLOR_PRESETS.gray;
+    default: // idle, connecting, listening, error
+      return COLOR_PRESETS.coral;
+  }
+}
 
 // Smooth color interpolation
 function lerpColor(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }, t: number) {
@@ -98,10 +97,10 @@ function lerpGradient(a: [string, string, string], b: [string, string, string], 
 
 export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
   // Animated color state with smooth transitions
-  const [currentColors, setCurrentColors] = useState<ColorSet>(COLOR_PRESETS.idle);
-  const [targetColors, setTargetColors] = useState<ColorSet>(COLOR_PRESETS.idle);
-  const [colorTransition, setColorTransition] = useState(1); // 0-1, 1 = complete
-  const [transitionBurst, setTransitionBurst] = useState(0); // Burst effect on state change
+  const [currentColors, setCurrentColors] = useState<ColorSet>(COLOR_PRESETS.coral);
+  const [targetColors, setTargetColors] = useState<ColorSet>(COLOR_PRESETS.coral);
+  const [colorTransition, setColorTransition] = useState(1);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   
   // Animation state
   const [pulse, setPulse] = useState(0);
@@ -110,6 +109,7 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
   const [eyeOpen, setEyeOpen] = useState(1);
   const [particles, setParticles] = useState<Particle[]>([]);
   const [ripples, setRipples] = useState<Ripple[]>([]);
+  const [glitterParticles, setGlitterParticles] = useState<Particle[]>([]);
   
   const requestRef = useRef<number>();
   const blinkTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -118,33 +118,69 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
   const rippleIdRef = useRef(0);
   const prevStatusRef = useRef(status);
 
-  // Trigger color transition when status changes
+  // Trigger immersive glitter transition when status changes
   useEffect(() => {
-    if (status !== prevStatusRef.current) {
-      const newTarget = COLOR_PRESETS[status] || COLOR_PRESETS.idle;
-      setTargetColors(newTarget);
+    const newPreset = getColorPreset(status);
+    const oldPreset = getColorPreset(prevStatusRef.current);
+    
+    if (status !== prevStatusRef.current && newPreset !== oldPreset) {
+      setTargetColors(newPreset);
       setColorTransition(0);
-      setTransitionBurst(1); // Trigger burst effect
+      setIsTransitioning(true);
       prevStatusRef.current = status;
       
-      // Spawn burst particles on state change
-      const burstParticles: Particle[] = [];
-      for (let i = 0; i < 12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
-        const speed = 1.5 + Math.random() * 2;
-        burstParticles.push({
+      // Create immersive 3D glitter burst
+      const glitterBurst: Particle[] = [];
+      const numParticles = 60; // Lots of glitter
+      
+      for (let i = 0; i < numParticles; i++) {
+        // Spherical distribution for 3D effect
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const speed = 1.5 + Math.random() * 3;
+        
+        // Mix of old and new colors for the transition effect
+        const useNewColor = Math.random() > 0.3;
+        const color = useNewColor ? newPreset.primary : oldPreset.primary;
+        
+        glitterBurst.push({
           id: particleIdRef.current++,
           x: size / 2,
           y: size / 2,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed,
-          size: 3 + Math.random() * 5,
-          opacity: 0.8,
-          color: newTarget.primary,
+          z: 0,
+          vx: Math.sin(phi) * Math.cos(theta) * speed,
+          vy: Math.sin(phi) * Math.sin(theta) * speed,
+          vz: Math.cos(phi) * speed * 0.5,
+          size: 1.5 + Math.random() * 4,
+          opacity: 0.8 + Math.random() * 0.2,
+          color,
           life: 1,
+          sparkle: Math.random(), // Random sparkle phase
         });
       }
-      setParticles(prev => [...prev, ...burstParticles]);
+      
+      setGlitterParticles(prev => [...prev, ...glitterBurst]);
+      
+      // Create swirling ring effect
+      const ringParticles: Particle[] = [];
+      for (let i = 0; i < 24; i++) {
+        const angle = (i / 24) * Math.PI * 2;
+        ringParticles.push({
+          id: particleIdRef.current++,
+          x: size / 2 + Math.cos(angle) * size * 0.4,
+          y: size / 2 + Math.sin(angle) * size * 0.4,
+          z: 0,
+          vx: Math.cos(angle + Math.PI / 2) * 2, // Swirl
+          vy: Math.sin(angle + Math.PI / 2) * 2,
+          vz: (Math.random() - 0.5) * 2,
+          size: 2 + Math.random() * 3,
+          opacity: 0.9,
+          color: newPreset.primary,
+          life: 1.2,
+          sparkle: i / 24,
+        });
+      }
+      setGlitterParticles(prev => [...prev, ...ringParticles]);
     }
   }, [status, size]);
 
@@ -159,38 +195,42 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
   }, [currentColors, targetColors, colorTransition]);
 
   const isActive = status === 'listening' || status === 'speaking' || status === 'thinking';
+  const isSpeaking = status === 'speaking' || status === 'thinking';
 
-  // Spawn particles when speaking or listening with audio
+  // Continuous ambient particles
   useEffect(() => {
-    if ((status === 'speaking' && volume > 0.02) || (status === 'listening' && volume > 0.05)) {
-      const count = Math.floor(volume * 4) + 1;
+    if (isActive && volume > 0.02) {
+      const count = Math.floor(volume * 3) + 1;
       const newParticles: Particle[] = [];
       
       for (let i = 0; i < count; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const speed = 0.5 + Math.random() * 1.5 + volume * 2;
+        const speed = 0.3 + Math.random() * 1 + volume * 1.5;
         newParticles.push({
           id: particleIdRef.current++,
           x: size / 2,
           y: size / 2,
+          z: 0,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
-          size: 2 + Math.random() * 4 + volume * 3,
-          opacity: 0.6 + Math.random() * 0.4,
+          vz: (Math.random() - 0.5) * speed,
+          size: 1.5 + Math.random() * 3 + volume * 2,
+          opacity: 0.5 + Math.random() * 0.4,
           color: displayColors.primary,
           life: 1,
+          sparkle: Math.random(),
         });
       }
       
-      setParticles(prev => [...prev.slice(-40), ...newParticles]);
+      setParticles(prev => [...prev.slice(-35), ...newParticles]);
     }
-  }, [volume, status, size, displayColors.primary]);
+  }, [volume, isActive, size, displayColors.primary]);
 
   // Spawn ripples for audio feedback
   useEffect(() => {
     if (isActive && volume > 0.03) {
       const intensity = Math.min(volume * 2.5, 1);
-      setRipples(prev => [...prev.slice(-5), {
+      setRipples(prev => [...prev.slice(-4), {
         id: rippleIdRef.current++,
         progress: 0,
         intensity,
@@ -207,12 +247,13 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
       const dt = (now - last) / 1000;
       last = now;
 
-      // Color transition (smooth over ~400ms)
+      // Color transition (smooth over ~500ms)
       setColorTransition(prev => {
         if (prev < 1) {
-          const newVal = prev + dt * 2.5; // ~400ms transition
+          const newVal = prev + dt * 2; // ~500ms transition
           if (newVal >= 1) {
             setCurrentColors(targetColors);
+            setIsTransitioning(false);
             return 1;
           }
           return newVal;
@@ -220,35 +261,48 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
         return 1;
       });
 
-      // Burst effect decay
-      setTransitionBurst(prev => Math.max(0, prev - dt * 3));
-
-      // Pulse speed based on state
-      const pulseSpeed = status === 'speaking' ? 3 + volume * 4 
-        : status === 'listening' ? 2 
-        : status === 'thinking' ? 2.5 
-        : 1.2;
-      
+      // Pulse speed
+      const pulseSpeed = isSpeaking ? 2.5 + volume * 3 : isActive ? 1.8 : 1.2;
       setPulse(prev => prev + dt * pulseSpeed);
-      setGradPhase(prev => prev + dt * (0.2 + (isActive ? 0.15 : 0) + volume * 0.3));
+      setGradPhase(prev => prev + dt * (0.2 + (isActive ? 0.12 : 0) + volume * 0.2));
       
-      // Update particles
+      // Update regular particles
       setParticles(prev => prev
         .map(p => ({
           ...p,
           x: p.x + p.vx,
           y: p.y + p.vy,
-          vx: p.vx * 0.98,
-          vy: p.vy * 0.98,
-          life: p.life - dt * 0.7,
-          opacity: p.opacity * (0.97 - dt * 0.3),
+          z: p.z + p.vz,
+          vx: p.vx * 0.97,
+          vy: p.vy * 0.97,
+          vz: p.vz * 0.95,
+          life: p.life - dt * 0.8,
+          opacity: p.opacity * (0.96 - dt * 0.2),
+          sparkle: (p.sparkle + dt * 3) % 1,
         }))
-        .filter(p => p.life > 0 && p.opacity > 0.03)
+        .filter(p => p.life > 0 && p.opacity > 0.02)
+      );
+      
+      // Update glitter particles with 3D sparkle effect
+      setGlitterParticles(prev => prev
+        .map(p => ({
+          ...p,
+          x: p.x + p.vx,
+          y: p.y + p.vy,
+          z: p.z + p.vz,
+          vx: p.vx * 0.94,
+          vy: p.vy * 0.94,
+          vz: p.vz * 0.92,
+          life: p.life - dt * 0.6,
+          opacity: p.opacity * (0.95 - dt * 0.15),
+          sparkle: (p.sparkle + dt * 5) % 1, // Fast sparkle
+        }))
+        .filter(p => p.life > 0 && p.opacity > 0.02)
       );
       
       // Update ripples
       setRipples(prev => prev
-        .map(r => ({ ...r, progress: r.progress + dt * 1.8 }))
+        .map(r => ({ ...r, progress: r.progress + dt * 1.5 }))
         .filter(r => r.progress < 1)
       );
 
@@ -257,16 +311,16 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
     
     requestRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(requestRef.current!);
-  }, [status, volume, isActive, targetColors]);
+  }, [isSpeaking, volume, isActive, targetColors]);
 
   // Eye blinking
   useEffect(() => {
     const blink = () => {
       setEyeOpen(0);
       setTimeout(() => setEyeOpen(1), 100 + Math.random() * 60);
-      blinkTimeout.current = setTimeout(blink, 2000 + Math.random() * 2000);
+      blinkTimeout.current = setTimeout(blink, 2500 + Math.random() * 2500);
     };
-    blinkTimeout.current = setTimeout(blink, 1500 + Math.random() * 1500);
+    blinkTimeout.current = setTimeout(blink, 2000 + Math.random() * 2000);
     return () => { if (blinkTimeout.current) clearTimeout(blinkTimeout.current); };
   }, []);
 
@@ -278,9 +332,9 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
         { x: 0, y: 1 }, { x: 0, y: -1 }, { x: -0.7, y: 0.7 },
       ];
       setEyeLook(dirs[Math.floor(Math.random() * dirs.length)]);
-      lookTimeout.current = setTimeout(look, 1500 + Math.random() * 2000);
+      lookTimeout.current = setTimeout(look, 1800 + Math.random() * 2200);
     };
-    lookTimeout.current = setTimeout(look, 1000);
+    lookTimeout.current = setTimeout(look, 1200);
     return () => { if (lookTimeout.current) clearTimeout(lookTimeout.current); };
   }, []);
 
@@ -289,15 +343,15 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
   const cy = size / 2;
   const r = size * 0.35;
   
-  // Dynamic scaling with more reaction to speaking
-  const speakingBoost = status === 'speaking' ? volume * 0.15 : 0;
-  const burstScale = transitionBurst * 0.1;
-  const pulseStrength = 0.04 + 0.06 * Math.abs(Math.sin(pulse * 0.7)) + volume * 0.1 + speakingBoost + burstScale;
+  // Dynamic scaling
+  const speakingBoost = isSpeaking ? volume * 0.12 : 0;
+  const transitionBoost = isTransitioning ? 0.08 * Math.sin(colorTransition * Math.PI) : 0;
+  const pulseStrength = 0.03 + 0.05 * Math.abs(Math.sin(pulse * 0.7)) + volume * 0.08 + speakingBoost + transitionBoost;
   const scale = 1 + pulseStrength;
 
-  // Gradient animation - faster when speaking
-  const gradCx = 55 + Math.sin(gradPhase) * 15 + (status === 'speaking' ? Math.sin(gradPhase * 3) * 5 : 0);
-  const gradCy = 35 + Math.cos(gradPhase * 1.3) * 12 + (status === 'speaking' ? Math.cos(gradPhase * 3) * 5 : 0);
+  // Gradient animation
+  const gradCx = 55 + Math.sin(gradPhase) * 15;
+  const gradCy = 35 + Math.cos(gradPhase * 1.3) * 12;
 
   // Eyes
   const eyeW = size * 0.07;
@@ -314,34 +368,66 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
   const glowId = `blob-glow-${instanceId}`;
   const overlayId = `blob-overlay-${instanceId}`;
 
-  // RGB string helpers
-  const rgb = (c: { r: number; g: number; b: number }) => `rgb(${c.r}, ${c.g}, ${c.b})`;
+  // RGB helpers
   const rgba = (c: { r: number; g: number; b: number }, a: number) => `rgba(${c.r}, ${c.g}, ${c.b}, ${a})`;
 
+  // Calculate 3D particle properties
+  const getParticle3D = (p: Particle) => {
+    const depth = (p.z + 50) / 100; // Normalize z to 0-1
+    const scale3d = 0.5 + depth * 0.8;
+    const blur = Math.max(0, (1 - depth) * 2);
+    // Sparkle effect - opacity varies with sparkle phase
+    const sparkleOpacity = p.opacity * (0.4 + 0.6 * Math.abs(Math.sin(p.sparkle * Math.PI * 2)));
+    return { scale3d, blur, sparkleOpacity };
+  };
+
   return (
-    <div className="blob-container" style={{ width: size + 60, height: size + 60 }}>
-      {/* Floating particles */}
+    <div className="blob-container" style={{ width: size + 80, height: size + 80 }}>
+      {/* Glitter particles (3D effect) */}
+      <svg 
+        className="blob-glitter"
+        viewBox={`0 0 ${size + 80} ${size + 80}`}
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}
+      >
+        {glitterParticles.map(p => {
+          const { scale3d, blur, sparkleOpacity } = getParticle3D(p);
+          return (
+            <circle
+              key={p.id}
+              cx={p.x + 40}
+              cy={p.y + 40 - p.z * 0.3} // Slight Y offset for depth
+              r={p.size * scale3d}
+              fill={rgba(p.color, sparkleOpacity)}
+              style={{ filter: blur > 0.5 ? `blur(${blur}px)` : undefined }}
+            />
+          );
+        })}
+      </svg>
+
+      {/* Regular particles */}
       <svg 
         className="blob-particles"
-        viewBox={`0 0 ${size + 60} ${size + 60}`}
+        viewBox={`0 0 ${size + 80} ${size + 80}`}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       >
-        {particles.map(p => (
-          <circle
-            key={p.id}
-            cx={p.x + 30}
-            cy={p.y + 30}
-            r={p.size}
-            fill={rgba(p.color, p.opacity)}
-            style={{ filter: 'blur(1px)' }}
-          />
-        ))}
+        {particles.map(p => {
+          const { scale3d, sparkleOpacity } = getParticle3D(p);
+          return (
+            <circle
+              key={p.id}
+              cx={p.x + 40}
+              cy={p.y + 40}
+              r={p.size * scale3d}
+              fill={rgba(p.color, sparkleOpacity)}
+            />
+          );
+        })}
       </svg>
 
       {/* Outer glow and ripples */}
       <svg
         className="blob-glow"
-        viewBox={`0 0 ${size + 60} ${size + 60}`}
+        viewBox={`0 0 ${size + 80} ${size + 80}`}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       >
         <defs>
@@ -350,17 +436,17 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
           <filter id={`${glowId}-blur`}>
-            <feGaussianBlur stdDeviation={size * 0.08} />
+            <feGaussianBlur stdDeviation={size * 0.1} />
           </filter>
         </defs>
         
-        {/* Ambient glow - larger when speaking */}
+        {/* Ambient glow */}
         <circle
-          cx={cx + 30}
-          cy={cy + 30}
-          r={r * (1.8 + (status === 'speaking' ? 0.3 + volume * 0.5 : 0) + transitionBurst * 0.5)}
+          cx={cx + 40}
+          cy={cy + 40}
+          r={r * (1.9 + (isSpeaking ? 0.3 + volume * 0.4 : 0) + (isTransitioning ? 0.3 : 0))}
           fill={`url(#${glowId})`}
-          opacity={0.6 + volume * 0.4 + transitionBurst * 0.3}
+          opacity={0.6 + volume * 0.3 + (isTransitioning ? 0.2 : 0)}
           style={{ filter: `url(#${glowId}-blur)` }}
         />
         
@@ -368,35 +454,23 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
         {ripples.map(ripple => (
           <circle
             key={ripple.id}
-            cx={cx + 30}
-            cy={cy + 30}
-            r={r + size * 0.1 + ripple.progress * size * 0.35}
+            cx={cx + 40}
+            cy={cy + 40}
+            r={r + size * 0.12 + ripple.progress * size * 0.35}
             fill="none"
-            stroke={rgba(displayColors.primary, ripple.intensity * (1 - ripple.progress) * 0.6)}
-            strokeWidth={3 * ripple.intensity * (1 - ripple.progress)}
+            stroke={rgba(displayColors.primary, ripple.intensity * (1 - ripple.progress) * 0.5)}
+            strokeWidth={2.5 * ripple.intensity * (1 - ripple.progress)}
           />
         ))}
         
         {/* Breathing ring */}
         {isActive && (
           <circle
-            cx={cx + 30}
-            cy={cy + 30}
+            cx={cx + 40}
+            cy={cy + 40}
             r={r + size * 0.1 + Math.sin(pulse * 0.5) * size * 0.04}
             fill="none"
-            stroke={rgba(displayColors.primary, 0.35)}
-            strokeWidth={2}
-          />
-        )}
-
-        {/* Second ring when speaking */}
-        {status === 'speaking' && (
-          <circle
-            cx={cx + 30}
-            cy={cy + 30}
-            r={r + size * 0.18 + Math.sin(pulse * 0.7 + 1) * size * 0.03}
-            fill="none"
-            stroke={rgba(displayColors.secondary, 0.25)}
+            stroke={rgba(displayColors.primary, 0.3)}
             strokeWidth={1.5}
           />
         )}
@@ -405,11 +479,11 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
       {/* Main blob sphere */}
       <svg
         className="blob-main"
-        viewBox={`0 0 ${size + 60} ${size + 60}`}
+        viewBox={`0 0 ${size + 80} ${size + 80}`}
         style={{ position: 'absolute', inset: 0 }}
       >
         <defs>
-          {/* Main gradient - updates with interpolated colors */}
+          {/* Main gradient */}
           <radialGradient id={gradientId} cx={`${gradCx}%`} cy={`${gradCy}%`} r="70%">
             <stop offset="0%" stopColor="#ffffff" />
             <stop offset="25%" stopColor={displayColors.gradient[0]} />
@@ -426,41 +500,41 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
           
           {/* Shadow */}
           <filter id={`${gradientId}-shadow`} x="-50%" y="-50%" width="200%" height="200%">
-            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor={displayColors.gradient[2]} floodOpacity="0.25"/>
+            <feDropShadow dx="0" dy="4" stdDeviation="8" floodColor={displayColors.gradient[2]} floodOpacity="0.3"/>
           </filter>
         </defs>
 
         {/* Shadow on ground */}
         <ellipse
-          cx={cx + 30}
-          cy={cy + 30 + r * 1.15}
+          cx={cx + 40}
+          cy={cy + 40 + r * 1.2}
           rx={r * 0.7 * scale}
           ry={r * 0.15}
           fill="rgba(0,0,0,0.1)"
-          style={{ filter: 'blur(6px)' }}
+          style={{ filter: 'blur(8px)' }}
         />
 
         {/* Main sphere body */}
         <circle
-          cx={cx + 30}
-          cy={cy + 30}
+          cx={cx + 40}
+          cy={cy + 40}
           r={r * scale}
           fill={`url(#${gradientId})`}
           style={{ filter: `url(#${gradientId}-shadow)` }}
         />
         
-        {/* Glass overlay for 3D depth */}
+        {/* Glass overlay */}
         <circle
-          cx={cx + 30}
-          cy={cy + 30}
+          cx={cx + 40}
+          cy={cy + 40}
           r={r * scale}
           fill={`url(#${overlayId})`}
         />
         
-        {/* Inner highlight reflection */}
+        {/* Inner highlight */}
         <ellipse
-          cx={cx + 30 - size * 0.03}
-          cy={cy + 30 - size * 0.04}
+          cx={cx + 40 - size * 0.03}
+          cy={cy + 40 - size * 0.04}
           rx={r * scale * 0.4}
           ry={r * scale * 0.25}
           fill="rgba(255,255,255,0.5)"
@@ -470,16 +544,16 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
         <g className="blob-eyes">
           {/* Eye shadows */}
           <rect
-            x={leftEyeX + 30 - eyeW / 2 + 1}
-            y={eyeY + 30 - eyeH / 2 + 1}
+            x={leftEyeX + 40 - eyeW / 2 + 1}
+            y={eyeY + 40 - eyeH / 2 + 1}
             width={eyeW}
             height={eyeH}
             rx={eyeRadius}
             fill="rgba(0,0,0,0.1)"
           />
           <rect
-            x={rightEyeX + 30 - eyeW / 2 + 1}
-            y={eyeY + 30 - eyeH / 2 + 1}
+            x={rightEyeX + 40 - eyeW / 2 + 1}
+            y={eyeY + 40 - eyeH / 2 + 1}
             width={eyeW}
             height={eyeH}
             rx={eyeRadius}
@@ -488,16 +562,16 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
           
           {/* Eyes */}
           <rect
-            x={leftEyeX + 30 - eyeW / 2}
-            y={eyeY + 30 - eyeH / 2}
+            x={leftEyeX + 40 - eyeW / 2}
+            y={eyeY + 40 - eyeH / 2}
             width={eyeW}
             height={eyeH}
             rx={eyeRadius}
             fill="#ffffff"
           />
           <rect
-            x={rightEyeX + 30 - eyeW / 2}
-            y={eyeY + 30 - eyeH / 2}
+            x={rightEyeX + 40 - eyeW / 2}
+            y={eyeY + 40 - eyeH / 2}
             width={eyeW}
             height={eyeH}
             rx={eyeRadius}
@@ -506,36 +580,21 @@ export default function Blob({ status, volume = 0, size = 120 }: BlobProps) {
           
           {/* Eye highlights */}
           <circle
-            cx={leftEyeX + 30 - eyeW * 0.1}
-            cy={eyeY + 30 - eyeH * 0.15}
+            cx={leftEyeX + 40 - eyeW * 0.1}
+            cy={eyeY + 40 - eyeH * 0.15}
             r={eyeW * 0.15}
             fill="rgba(255,255,255,0.95)"
             opacity={eyeOpen}
           />
           <circle
-            cx={rightEyeX + 30 - eyeW * 0.1}
-            cy={eyeY + 30 - eyeH * 0.15}
+            cx={rightEyeX + 40 - eyeW * 0.1}
+            cy={eyeY + 40 - eyeH * 0.15}
             r={eyeW * 0.15}
             fill="rgba(255,255,255,0.95)"
             opacity={eyeOpen}
           />
         </g>
       </svg>
-
-      {/* Status indicator (small dot) */}
-      <div 
-        className="blob-status-indicator"
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          right: 8,
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          backgroundColor: rgb(displayColors.primary),
-          boxShadow: `0 0 6px ${rgba(displayColors.primary, 0.6)}`,
-        }}
-      />
     </div>
   );
 }

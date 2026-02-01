@@ -19,17 +19,18 @@ LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 ROOM_NAME = "zero-me-room"
 AGENT_NAME = "Casey-160"  # Must match the agent_name in demo.py
 
+
 async def create_room_and_dispatch_agent():
     """Create room and dispatch agent to it"""
     lk_api = api.LiveKitAPI(LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
-    
+
     try:
         # Create room if it doesn't exist
         await lk_api.room.create_room(api.CreateRoomRequest(name=ROOM_NAME))
         print(f"[TokenServer] Room '{ROOM_NAME}' created/exists")
     except Exception as e:
         print(f"[TokenServer] Room create: {e}")
-    
+
     try:
         # Dispatch agent to room
         await lk_api.agent_dispatch.create_dispatch(
@@ -41,8 +42,9 @@ async def create_room_and_dispatch_agent():
         print(f"[TokenServer] Agent '{AGENT_NAME}' dispatched to room")
     except Exception as e:
         print(f"[TokenServer] Agent dispatch: {e}")
-    
+
     await lk_api.aclose()
+
 
 class TokenHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -68,16 +70,18 @@ class TokenHandler(BaseHTTPRequestHandler):
             token = api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
             token.with_identity("user-" + str(os.urandom(4).hex()))
             token.with_name("User")
-            token.with_grants(api.VideoGrants(
-                room_join=True,
-                room=ROOM_NAME,
-                can_publish=True,
-                can_subscribe=True,
-                agent=False,
-            ))
+            token.with_grants(
+                api.VideoGrants(
+                    room_join=True,
+                    room=ROOM_NAME,
+                    can_publish=True,
+                    can_subscribe=True,
+                    agent=False,
+                )
+            )
 
             jwt = token.to_jwt()
-            
+
             response = {
                 "token": jwt,
                 "url": LIVEKIT_URL,
@@ -90,6 +94,7 @@ class TokenHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"[TokenServer] {args[0]}")
 
+
 def main():
     if not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
         print("Error: Missing LIVEKIT_API_KEY or LIVEKIT_API_SECRET in .env.local")
@@ -101,6 +106,7 @@ def main():
     print(f"   LiveKit URL: {LIVEKIT_URL}")
     print()
     server.serve_forever()
+
 
 if __name__ == "__main__":
     main()

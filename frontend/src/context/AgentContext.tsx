@@ -43,6 +43,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const volumeIntervalRef = useRef<number | null>(null);
+  const previewStatusRef = useRef<AgentStatus>('listening'); // Status before pause
+  const audioElementsRef = useRef<HTMLAudioElement[]>([]); // Track audio elements
+  const isPausedRef = useRef(false); // Track paused state for closures
 
   const setStatus = useCallback((newStatus: AgentStatus) => {
     setStatusInternal(newStatus);
@@ -134,23 +137,21 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       const monitorAgentState = (participant: RemoteParticipant) => {
         const checkAgentState = () => {
           const agentState = participant.attributes?.['lk.agent.state'];
-          if (agentState) {
-            console.log('🤖 Agent state changed:', agentState);
-            switch (agentState) {
-              case 'initializing':
-                setStatus('connecting');
-                break;
-              case 'listening':
-                setStatus('listening');
-                break;
-              case 'thinking':
-                setStatus('thinking');
-                break;
-              case 'speaking':
-                setStatus('speaking');
-                break;
-            }
+          if (!agentState) return;
+          
+          const mappedStatus: AgentStatus = agentState === 'speaking' ? 'speaking' 
+            : agentState === 'thinking' ? 'thinking' 
+            : agentState === 'initializing' ? 'connecting'
+            : 'listening';
+          
+          // If paused, store for resume but don't change UI status
+          if (isPausedRef.current) {
+            previewStatusRef.current = mappedStatus;
+            return;
           }
+          
+          console.log('🤖 Agent state changed:', agentState);
+          setStatus(mappedStatus);
         };
 
         // Check initial state
@@ -188,15 +189,22 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         console.log('🎵 Track subscribed:', track.kind, 'from', participant.identity);
         
         if (track.kind === Track.Kind.Audio) {
-          const element = track.attach();
+          const element = track.attach() as HTMLAudioElement;
           element.id = `audio-${participant.identity}`;
           document.body.appendChild(element);
+          // Keep track of audio elements for pause/resume
+          audioElementsRef.current.push(element);
           console.log('🔊 Audio attached');
         }
       });
 
       room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        track.detach().forEach(el => el.remove());
+        const detached = track.detach();
+        detached.forEach(el => {
+          // Remove from our tracking array
+          audioElementsRef.current = audioElementsRef.current.filter(a => a !== el);
+          el.remove();
+        });
       });
 
       // Connect
@@ -217,18 +225,47 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   }, [setStatus, startVolumeMonitoring, stopVolumeMonitoring]);
 
   const pause = useCallback(async () => {
-    if (roomRef.current) {
-      const isMuted = roomRef.current.localParticipant.isMicrophoneEnabled;
-      await roomRef.current.localParticipant.setMicrophoneEnabled(!isMuted);
-      setStatus(isMuted ? 'listening' : 'paused');
+    if (!roomRef.current) return;
+
+    if (status === 'paused') {
+      // Resume: unmute mic and audio
+      console.log('▶️ Resuming...');
+      isPausedRef.current = false;
+      
+      await roomRef.current.localParticipant.setMicrophoneEnabled(true);
+      
+      // Unmute all agent audio
+      audioElementsRef.current.forEach(el => {
+        el.muted = false;
+      });
+      
+      // Restore previous status
+      setStatus(previewStatusRef.current);
+    } else {
+      // Pause: mute mic and audio
+      console.log('⏸️ Pausing...');
+      isPausedRef.current = true;
+      previewStatusRef.current = status; // Save current status
+      
+      await roomRef.current.localParticipant.setMicrophoneEnabled(false);
+      
+      // Mute all agent audio
+      audioElementsRef.current.forEach(el => {
+        el.muted = true;
+      });
+      
+      setStatus('paused');
     }
-  }, [setStatus]);
+  }, [status, setStatus]);
 
   const stop = useCallback(() => {
     if (roomRef.current) {
       roomRef.current.disconnect();
       roomRef.current = null;
     }
+    // Reset state
+    audioElementsRef.current = [];
+    isPausedRef.current = false;
     stopVolumeMonitoring();
     setStatus('idle');
     window.electronAPI?.hideBlob();

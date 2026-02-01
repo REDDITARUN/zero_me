@@ -121,3 +121,23 @@ button:disabled {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* Blob mode - no scrollbars */
+body.blob-mode {
+  overflow: hidden !important;
+  background: transparent !important;
+}
+
+body.blob-mode::-webkit-scrollbar,
+body.blob-mode *::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+body.blob-mode,
+body.blob-mode html,
+body.blob-mode #root {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
