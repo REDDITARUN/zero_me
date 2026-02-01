@@ -265,21 +265,24 @@ class VoiceAgentBridge:
                     full_text, self.user_id
                 )
             
-            # 3. Log session metrics to WandB
+            # 3. Log session metrics to WandB (personality enhancer already logs detailed metrics)
             if self.analytics:
                 self.analytics.log_conversation_end(
                     conversation_id=self.conversation_id,
                     user_id=self.user_id,
-                    num_turns=len(self.conversation_text),
+                    questions_asked=self.personality_enhancer.current_conversation.get("questions_asked", 0) if self.personality_enhancer else 0,
+                    tasks_delegated=self.personality_enhancer.current_conversation.get("tasks_delegated", 0) if self.personality_enhancer else 0,
+                    topics=self.personality_enhancer.topics if self.personality_enhancer else [],
                     summary=summary
                 )
                 logger.info("📈 Session metrics logged to WandB")
             
             # 4. Store conversation in memory for future reference
             if self.memory and self.memory.is_available() and summary:
-                await self.memory.store_conversation_summary(
+                # store_conversation_summary is sync, expects summary as dict
+                self.memory.store_conversation_summary(
                     user_id=self.user_id,
-                    summary=summary,
+                    summary={"text": summary} if isinstance(summary, str) else summary,
                     topics=self.personality_enhancer.topics if self.personality_enhancer else [],
                     duration=0  # We don't track duration yet
                 )
@@ -447,48 +450,63 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         task_description = params.arguments.get("task_description", "")
         task_type = params.arguments.get("task_type", "general")
         
-        logger.info(f"")
-        logger.info(f"🎯 ═══════════════════════════════════════════════════════")
-        logger.info(f"🎯 FUNCTION CALL: delegate_task")
-        logger.info(f"🎯 Task Type: {task_type}")
-        logger.info(f"🎯 Task: {task_description}")
-        logger.info(f"🎯 ═══════════════════════════════════════════════════════")
+        # Yellow color for tool calls
+        YELLOW = "\033[1;33m"
+        CYAN = "\033[1;36m"
+        RESET = "\033[0m"
+        
+        print(f"\n{YELLOW}╔══════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{YELLOW}║  🎯 FUNCTION CALL: delegate_task{RESET}")
+        print(f"{YELLOW}║  📋 Type: {task_type}{RESET}")
+        print(f"{YELLOW}║  📝 Task: {task_description[:60]}...{RESET}")
+        print(f"{YELLOW}╚══════════════════════════════════════════════════════════╝{RESET}")
         
         result = await voice_bridge.delegate_task(task_description, task_type)
         await params.result_callback(result)
-        logger.info(f"📤 Result: {result.get('result', '')[:80]}...")
+        
+        print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
     
     async def handle_remember_info(params: FunctionCallParams):
         """Handle the remember_info function call from Gemini."""
         key = params.arguments.get("key", "")
         value = params.arguments.get("value", "")
         
-        logger.info(f"")
-        logger.info(f"💾 ═══════════════════════════════════════════════════════")
-        logger.info(f"💾 FUNCTION CALL: remember_info")
-        logger.info(f"💾 Key: {key}")
-        logger.info(f"💾 Value: {value}")
-        logger.info(f"💾 ═══════════════════════════════════════════════════════")
+        # Magenta/Purple for memory operations
+        MAGENTA = "\033[1;35m"
+        CYAN = "\033[1;36m"
+        RESET = "\033[0m"
+        
+        print(f"\n{MAGENTA}╔══════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{MAGENTA}║  💾 FUNCTION CALL: remember_info{RESET}")
+        print(f"{MAGENTA}║  🔑 Key: {key}{RESET}")
+        print(f"{MAGENTA}║  📝 Value: {value[:60]}...{RESET}")
+        print(f"{MAGENTA}╚══════════════════════════════════════════════════════════╝{RESET}")
         
         result = await voice_bridge.remember_info(key, value)
         await params.result_callback(result)
-        logger.info(f"📤 Result: {result.get('result', '')[:80]}...")
+        
+        print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
     
     async def handle_recall_info(params: FunctionCallParams):
         """Handle the recall_info function call from Gemini."""
         key = params.arguments.get("key")
         search_query = params.arguments.get("search_query")
         
-        logger.info(f"")
-        logger.info(f"🔍 ═══════════════════════════════════════════════════════")
-        logger.info(f"🔍 FUNCTION CALL: recall_info")
-        logger.info(f"🔍 Key: {key}")
-        logger.info(f"🔍 Search: {search_query}")
-        logger.info(f"🔍 ═══════════════════════════════════════════════════════")
+        # Blue for recall/search operations
+        BLUE = "\033[1;34m"
+        CYAN = "\033[1;36m"
+        RESET = "\033[0m"
+        
+        print(f"\n{BLUE}╔══════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{BLUE}║  🔍 FUNCTION CALL: recall_info{RESET}")
+        print(f"{BLUE}║  🔑 Key: {key}{RESET}")
+        print(f"{BLUE}║  🔎 Search: {search_query}{RESET}")
+        print(f"{BLUE}╚══════════════════════════════════════════════════════════╝{RESET}")
         
         result = await voice_bridge.recall_info(key, search_query)
         await params.result_callback(result)
-        logger.info(f"📤 Result: {result.get('result', '')[:80]}...")
+        
+        print(f"{CYAN}║  📤 Result: {result.get('result', '')[:60]}...{RESET}")
     
     # Register all function handlers
     llm.register_function("delegate_task", handle_delegate_task, cancel_on_interruption=False)
