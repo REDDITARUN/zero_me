@@ -82,6 +82,7 @@ def create_notion_page(
     Returns:
         Success message with page ID or error message
     """
+    logger.info(f"🔧 TOOL CALLED: create_notion_page(title='{title}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -134,6 +135,7 @@ def read_notion_page(page_id: str) -> str:
     Returns:
         The page content or error message
     """
+    logger.info(f"🔧 TOOL CALLED: read_notion_page(page_id='{page_id}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -188,6 +190,7 @@ def search_notion(query: str, filter_type: str = "page") -> str:
     Returns:
         List of matching pages or error message
     """
+    logger.info(f"🔧 TOOL CALLED: search_notion(query='{query}', filter_type='{filter_type}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -241,6 +244,7 @@ def add_todo(
     Returns:
         Success message or error
     """
+    logger.info(f"🔧 TOOL CALLED: add_todo(title='{title}', due_date='{due_date}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -299,6 +303,7 @@ def get_todos(
     Returns:
         List of todos or error message
     """
+    logger.info(f"🔧 TOOL CALLED: get_todos(status='{status}', limit={limit})")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -368,6 +373,7 @@ def update_todo(
     Returns:
         Success message or error
     """
+    logger.info(f"🔧 TOOL CALLED: update_todo(page_id='{page_id}', status='{status}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -430,6 +436,7 @@ def add_calendar_event(
     Returns:
         Success message or error
     """
+    logger.info(f"🔧 TOOL CALLED: add_calendar_event(title='{title}', start_date='{start_date}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -489,6 +496,7 @@ def get_calendar_events(
     Returns:
         List of events or error message
     """
+    logger.info(f"🔧 TOOL CALLED: get_calendar_events(start='{start_date}', end='{end_date}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -568,6 +576,7 @@ def update_calendar_event(
     Returns:
         Success message or error
     """
+    logger.info(f"🔧 TOOL CALLED: update_calendar_event(page_id='{page_id}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -611,6 +620,7 @@ def delete_calendar_event(page_id: str) -> str:
     Returns:
         Success message or error
     """
+    logger.info(f"🔧 TOOL CALLED: delete_calendar_event(page_id='{page_id}')")
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."

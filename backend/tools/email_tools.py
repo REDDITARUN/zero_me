@@ -54,6 +54,7 @@ def send_email(
     Returns:
         Success message with email ID or error message
     """
+    logger.info(f"🔧 TOOL CALLED: send_email(to='{to}', subject='{subject}')")
     if not init_resend():
         return "Error: Email service is not configured. Please set RESEND_API_KEY."
     
@@ -108,6 +109,7 @@ def draft_email(
     Returns:
         Formatted draft email for review
     """
+    logger.info(f"🔧 TOOL CALLED: draft_email(to='{to}', subject='{subject}')")
     sender = from_email or os.getenv("RESEND_FROM_EMAIL", "Zero Me <onboarding@resend.dev>")
     
     draft = f"""
@@ -143,6 +145,7 @@ def check_email_status(email_id: str) -> str:
     Returns:
         Email status information
     """
+    logger.info(f"🔧 TOOL CALLED: check_email_status(email_id='{email_id}')")
     if not init_resend():
         return "Error: Email service is not configured. Please set RESEND_API_KEY."
     

@@ -42,6 +42,7 @@ def store_memory(context_key: str, context_value: str, user_id: Optional[str] = 
         - store_memory("timezone", "America/New_York") -> Remembers user's timezone
         - store_memory("project_focus", "Building a mobile app") -> Remembers current project
     """
+    logger.info(f"🔧 TOOL CALLED: store_memory(key='{context_key}', value='{context_value[:50]}...')")
     memory = get_memory_manager()
     analytics = get_analytics_manager()
     
@@ -74,6 +75,7 @@ def retrieve_memory(context_key: Optional[str] = None, user_id: Optional[str] = 
     Returns:
         Retrieved context or message if not found
     """
+    logger.info(f"🔧 TOOL CALLED: retrieve_memory(key='{context_key}')")
     memory = get_memory_manager()
     analytics = get_analytics_manager()
     
@@ -118,6 +120,7 @@ def search_memory(query: str, user_id: Optional[str] = None) -> str:
     Returns:
         Matching memories or message if none found
     """
+    logger.info(f"🔧 TOOL CALLED: search_memory(query='{query}')")
     memory = get_memory_manager()
     
     uid = user_id or DEFAULT_USER_ID
@@ -149,6 +152,7 @@ def delete_memory(context_key: str, user_id: Optional[str] = None) -> str:
     Returns:
         Success or error message
     """
+    logger.info(f"🔧 TOOL CALLED: delete_memory(key='{context_key}')")
     memory = get_memory_manager()
     analytics = get_analytics_manager()
     
@@ -180,6 +184,7 @@ def get_conversation_history(limit: int = 5, user_id: Optional[str] = None) -> s
     Returns:
         Recent conversation summaries
     """
+    logger.info(f"🔧 TOOL CALLED: get_conversation_history(limit={limit})")
     memory = get_memory_manager()
     
     uid = user_id or DEFAULT_USER_ID
