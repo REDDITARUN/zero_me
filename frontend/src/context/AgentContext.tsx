@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { PipecatClient } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
+import { PipecatClientProvider, PipecatClientAudio } from '@pipecat-ai/client-react';
 
 export type AgentStatus = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'paused' | 'error';
 
@@ -39,9 +40,8 @@ const PIPECAT_CONNECT_ENDPOINT = import.meta.env.VITE_PIPECAT_CONNECT_ENDPOINT |
 export function AgentProvider({ children }: { children: ReactNode }) {
   const [status, setStatusInternal] = useState<AgentStatus>('idle');
   const [volume, setVolumeInternal] = useState(0);
+  const [client, setClient] = useState<PipecatClient | null>(null);
   const clientRef = useRef<PipecatClient | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const volumeIntervalRef = useRef<number | null>(null);
   const micEnabledRef = useRef<boolean>(true);
 
@@ -55,29 +55,14 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Monitor local audio for visualization
+  // Note: AudioContext is disabled to avoid conflicts with Daily's WebRTC audio
   const startVolumeMonitoring = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new AudioContext();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      source.connect(analyserRef.current);
-      analyserRef.current.fftSize = 256;
-      
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-      
-      volumeIntervalRef.current = window.setInterval(() => {
-        if (analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          const normalized = average / 255;
-          setVolume(normalized);
-        }
-      }, 50);
-    } catch (error) {
-      console.error('Failed to access microphone:', error);
-    }
+    console.log('Volume monitoring started (simulated to avoid AudioContext conflicts)');
+    // Simple fallback: simulate volume activity when connected
+    volumeIntervalRef.current = window.setInterval(() => {
+      const simulatedVolume = 0.3 + Math.random() * 0.2;
+      setVolume(simulatedVolume);
+    }, 100);
   }, [setVolume]);
 
   const stopVolumeMonitoring = useCallback(() => {
@@ -85,11 +70,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       clearInterval(volumeIntervalRef.current);
       volumeIntervalRef.current = null;
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-  }, []);
+    setVolume(0);
+  }, [setVolume]);
 
   const start = useCallback(async () => {
     setStatus('connecting');
@@ -150,6 +132,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       });
 
       clientRef.current = pcClient;
+      setClient(pcClient);  // Trigger re-render for PipecatClientProvider
       micEnabledRef.current = true;
 
     } catch (error) {
@@ -175,6 +158,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     if (clientRef.current) {
       clientRef.current.disconnect();
       clientRef.current = null;
+      setClient(null);  // Clear client state
     }
     stopVolumeMonitoring();
     setStatus('idle');
@@ -223,7 +207,15 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   return (
     <AgentContext.Provider value={{ status, setStatus, volume, setVolume, start, pause, stop, isActive }}>
-      {children}
+      {client ? (
+        <PipecatClientProvider client={client}>
+          {/* PipecatClientAudio handles bot audio playback automatically */}
+          <PipecatClientAudio />
+          {children}
+        </PipecatClientProvider>
+      ) : (
+        children
+      )}
     </AgentContext.Provider>
   );
 }

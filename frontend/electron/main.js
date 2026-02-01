@@ -1,6 +1,9 @@
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, session } = require('electron');
 const path = require('path');
 
+// Chromium flag for audio autoplay (must be before app.whenReady())
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 let dashboardWindow = null;
 let blobWindow = null;
 
@@ -145,9 +148,9 @@ ipcMain.on('agent-state', (event, state) => {
 });
 
 app.whenReady().then(() => {
-  // Grant microphone permission for WebRTC
+  // Grant microphone and audio permissions for WebRTC
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications'];
+    const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications', 'audioCapture'];
     if (allowedPermissions.includes(permission)) {
       callback(true);
     } else {
@@ -157,7 +160,7 @@ app.whenReady().then(() => {
 
   // Also handle permission checks
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    const allowedPermissions = ['media', 'mediaKeySystem'];
+    const allowedPermissions = ['media', 'mediaKeySystem', 'audioCapture'];
     return allowedPermissions.includes(permission);
   });
 

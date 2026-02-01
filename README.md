@@ -6,10 +6,11 @@ A floating voice assistant with a cute blob companion. Built with Electron + Rea
 
 ```
 ├── backend/           # Python Pipecat voice agent
-│   ├── bot.py         # Pipecat pipeline (STT → LLM → TTS)
-│   ├── server.py      # Connect endpoint for sessions
+│   ├── bot.py         # Pipecat pipeline (Gemini Live speech-to-speech)
+│   ├── server.py      # Local development server (optional)
+│   ├── Dockerfile     # Pipecat Cloud deployment
 │   ├── requirements.txt
-│   ├── start.sh       # Setup venv & run server
+│   ├── start.sh       # Setup venv & run locally
 │   └── .env.example
 │
 ├── frontend/          # Electron + React app
@@ -38,9 +39,10 @@ A floating voice assistant with a cute blob companion. Built with Electron + Rea
 
 ## Tech Stack
 
-- **Backend**: Pipecat (Python) with Google STT/TTS and Gemini LLM
+- **Backend**: Pipecat (Python) with Gemini Live (native speech-to-speech)
 - **Frontend**: Electron + React + Pipecat Client SDK
 - **Transport**: Daily WebRTC for real-time audio
+- **Deployment**: Pipecat Cloud (managed) or self-hosted
 
 ## Getting Started
 
@@ -48,11 +50,84 @@ A floating voice assistant with a cute blob companion. Built with Electron + Rea
 
 - Python 3.9+
 - Node.js 18+
-- [Daily API Key](https://dashboard.daily.co/developers) (free tier available)
-- [Google API Key](https://aistudio.google.com/app/apikey) for Gemini LLM
-- [Google Cloud credentials](https://console.cloud.google.com/) for STT/TTS (optional, can use API key)
+- [Google API Key](https://aistudio.google.com/app/apikey) for Gemini Live
 
-### Backend Setup
+### Option 1: Pipecat Cloud (Recommended)
+
+Pipecat Cloud is the easiest way to deploy - no infrastructure management needed.
+
+#### 1. Create Pipecat Cloud Account
+
+```bash
+# Sign up at https://pipecat.daily.co
+# Get your API key from the dashboard
+```
+
+#### 2. Install Pipecat CLI
+
+```bash
+# Install the Pipecat CLI globally using uv (recommended) or pipx
+# Requires Python 3.10+
+
+# Using uv (recommended):
+uv tool install pipecat-ai-cli
+
+# Or using pipx:
+pipx install pipecat-ai-cli
+
+# Verify installation
+pipecat --version
+```
+
+#### 3. Deploy the Bot
+
+```bash
+cd backend
+
+# Copy and configure environment
+cp .env.example .env.local
+# Edit .env.local with your GOOGLE_API_KEY
+
+# Login to Pipecat Cloud
+pipecat cloud auth login
+
+# Build and push Docker image
+pipecat cloud docker build-push
+
+# Deploy the agent
+pipecat cloud deploy
+
+# Store your Google API key as a secret
+pipecat cloud secrets set GOOGLE_API_KEY=your-google-api-key
+```
+
+#### 3. Configure Frontend for Cloud
+
+```bash
+cd frontend
+
+# Copy and configure environment
+cp .env.example .env.local
+
+# Edit .env.local:
+#   VITE_PIPECAT_MODE=cloud
+#   VITE_PIPECAT_CLOUD_AGENT_NAME=your-agent-name
+#   VITE_PIPECAT_CLOUD_API_KEY=pk_your-api-key
+
+# Install and run
+npm install
+npm run dev
+```
+
+### Option 2: Local Development (Self-Hosted)
+
+For testing locally before deploying to Pipecat Cloud.
+
+#### Prerequisites (Local Mode Only)
+
+- [Daily API Key](https://dashboard.daily.co/developers) (free tier available)
+
+#### 1. Backend Setup
 
 ```bash
 cd backend
@@ -62,6 +137,9 @@ cp .env.example .env.local
 # Edit .env.local with your API keys:
 #   DAILY_API_KEY=your-daily-api-key
 #   GOOGLE_API_KEY=your-google-api-key
+#   ENV=local
+
+# Uncomment local dependencies in requirements.txt
 
 # Run the setup script (creates venv, installs deps, starts server)
 ./start.sh
@@ -71,18 +149,20 @@ The server will start at `http://localhost:8080` with:
 - `POST /connect` - Creates a voice session (returns Daily room URL + token)
 - `GET /health` - Health check
 
-### Frontend Setup
+#### 2. Frontend Setup (Local Mode)
 
 ```bash
 cd frontend
 
-# Install dependencies
-npm install
-
-# Copy and configure environment (optional, defaults to localhost:8080)
+# Copy and configure environment
 cp .env.example .env.local
 
-# Start the Electron app
+# Edit .env.local:
+#   VITE_PIPECAT_MODE=local
+#   VITE_PIPECAT_CONNECT_ENDPOINT=http://localhost:8080/connect
+
+# Install and run
+npm install
 npm run dev
 ```
 
@@ -90,68 +170,103 @@ npm run dev
 
 ### How It Works
 
-1. **User clicks Start** → Frontend calls `/connect` endpoint
+#### Pipecat Cloud Mode
+1. **User clicks Start** → Frontend calls Pipecat Cloud `/start` endpoint
+2. **Pipecat Cloud creates Daily room** → Launches bot container automatically
+3. **Frontend joins room** → Via Pipecat Client SDK + Daily Transport
+4. **Voice pipeline runs** (see below)
+
+#### Local Mode
+1. **User clicks Start** → Frontend calls local `/connect` endpoint
 2. **Server creates Daily room** → Launches bot subprocess to join
 3. **Frontend joins same room** → Via Pipecat Client SDK + Daily Transport
-4. **Voice pipeline runs**:
-   - User speaks → Daily captures audio
-   - Audio → Google STT → Text
-   - Text → Gemini LLM → Response
-   - Response → Google TTS → Audio
-   - Audio → Daily → User hears response
+4. **Voice pipeline runs** (see below)
 
-### Pipecat Pipeline
+### Voice Pipeline
+
+Using Gemini Live for native speech-to-speech:
 
 ```
-[Daily Input] → [Google STT] → [User Aggregator] → [Gemini LLM] → [Google TTS] → [Daily Output]
+[Daily Audio Input] → [VAD] → [Gemini Live (STT+LLM+TTS)] → [Daily Audio Output]
 ```
 
-## Deployment
+Gemini Live handles:
+- Speech-to-Text (STT) - listens to user speech
+- LLM processing - generates response
+- Text-to-Speech (TTS) - speaks the response
 
-### Pipecat Cloud (Recommended)
+All in one service with low latency!
 
-For production, deploy to [Pipecat Cloud](https://pipecat.daily.co):
+## Deployment Comparison
 
-```bash
-# Install CLI
-pip install pipecat-cli
-
-# Login and deploy
-pipecat cloud login
-pipecat cloud docker build-push
-pipecat cloud deploy --name zero-me-bot --image your-image-url
-```
-
-Then update frontend to use Cloud endpoint:
-```
-VITE_PIPECAT_CONNECT_ENDPOINT=https://api.pipecat.cloud/v1/agents/zero-me-bot/connect
-```
-
-### Self-Hosted
-
-You can also deploy to any cloud provider that runs Python (Fly.io, AWS, GCP, etc.).
-See [Pipecat Deployment Docs](https://docs.pipecat.ai/deployment/overview).
+| Feature | Pipecat Cloud | Self-Hosted |
+|---------|--------------|-------------|
+| Daily API Key | Integrated (free 1:1 voice) | Required |
+| Infrastructure | Managed | Your responsibility |
+| Scaling | Automatic | Manual |
+| Krisp Noise Cancellation | Included | Not available |
+| Setup | 3 CLI commands | Server + bot management |
 
 ## Environment Variables
 
 ### Backend (`backend/.env.local`)
 
-| Variable | Description |
-|----------|-------------|
-| `DAILY_API_KEY` | Daily.co API key for WebRTC rooms |
-| `GOOGLE_API_KEY` | Google API key for Gemini LLM |
-| `GOOGLE_CREDENTIALS_PATH` | Path to Google Cloud service account JSON (for STT/TTS) |
-| `PORT` | Server port (default: 8080) |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GOOGLE_API_KEY` | Yes | Google API key for Gemini Live |
+| `PIPECAT_CLOUD_API_KEY` | Cloud only | Pipecat Cloud API key |
+| `DAILY_API_KEY` | Local only | Daily.co API key for WebRTC |
+| `ENV` | Local only | Set to 'local' for development |
+| `PORT` | No | Server port (default: 8080) |
 
 ### Frontend (`frontend/.env.local`)
 
 | Variable | Description |
 |----------|-------------|
-| `VITE_PIPECAT_CONNECT_ENDPOINT` | Backend connect URL (default: http://localhost:8080/connect) |
+| `VITE_PIPECAT_MODE` | 'cloud' or 'local' (default: cloud) |
+| `VITE_PIPECAT_CLOUD_AGENT_NAME` | Your Pipecat Cloud agent name |
+| `VITE_PIPECAT_CLOUD_API_KEY` | Pipecat Cloud API key |
+| `VITE_PIPECAT_CONNECT_ENDPOINT` | Local server URL (local mode only) |
+
+## CLI Commands (Pipecat Cloud)
+
+```bash
+# Install CLI (using uv or pipx)
+uv tool install pipecat-ai-cli
+# or: pipx install pipecat-ai-cli
+
+# Verify installation
+pipecat --version
+
+# Login to Pipecat Cloud
+pipecat cloud auth login
+
+# Build and push Docker image
+pipecat cloud docker build-push
+
+# Deploy agent (reads pcc-deploy.toml if present)
+pipecat cloud deploy
+
+# Deploy with specific options
+pipecat cloud deploy my-agent my-image:latest --region us-west
+
+# Set secrets
+pipecat cloud secrets set GOOGLE_API_KEY=your-key
+
+# Check agent status
+pipecat cloud agent status my-agent-name
+
+# Monitor live sessions
+pipecat tail
+
+# Delete a deployment
+pipecat cloud agent delete my-agent-name
+```
 
 ## Resources
 
 - [Pipecat Documentation](https://docs.pipecat.ai/)
+- [Pipecat Cloud](https://docs.pipecat.ai/deployment/pipecat-cloud/introduction)
 - [Pipecat Examples](https://github.com/pipecat-ai/pipecat-examples)
 - [Daily WebRTC](https://www.daily.co/)
-- [Google Cloud AI](https://cloud.google.com/ai)
+- [Google Gemini](https://ai.google.dev/)

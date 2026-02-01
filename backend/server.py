@@ -1,6 +1,14 @@
 """
-Connect endpoint server for Pipecat
-Handles creating Daily rooms and launching bot sessions
+LOCAL DEVELOPMENT SERVER for Pipecat (self-hosted mode)
+
+This server is ONLY needed for local development when NOT using Pipecat Cloud.
+When deploying to Pipecat Cloud, this file is not used - Pipecat Cloud handles
+room creation and bot lifecycle automatically.
+
+Use this when:
+- Running locally without Pipecat Cloud
+- Testing before deploying to Pipecat Cloud
+- Need full control over infrastructure
 
 Run with: python server.py
 """
@@ -18,7 +26,7 @@ from loguru import logger
 
 load_dotenv(".env.local")
 
-app = FastAPI(title="Zero Me - Pipecat Connect Server")
+app = FastAPI(title="Zero Me - Local Development Server")
 
 # CORS for Electron app
 app.add_middleware(
@@ -116,22 +124,26 @@ def launch_bot_process(room_url: str, room_name: str):
     # Prepare environment with all needed vars
     env = os.environ.copy()
     env["ENV"] = "local"
+    # Pass Daily room URL via environment variable (required by pipecat runner)
+    env["DAILY_ROOM_URL"] = room_url
     
     logger.info(f"Launching bot with Python: {python_path}")
     logger.info(f"Bot script: {bot_script}")
     logger.info(f"Room URL: {room_url}")
     
-    # Launch bot process
+    # Launch bot using the pipecat runner with daily transport
+    # -d flag = direct Daily connection, room URL from DAILY_ROOM_URL env var
     process = subprocess.Popen(
         [
             python_path,
-            bot_script,
-            "--room-url", room_url,
+            "-m", "pipecat.runner.run",
+            "-t", "daily",
+            "-d",  # Direct connection to Daily room
         ],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        bufsize=1,
+        cwd=os.path.dirname(__file__),
     )
     
     # Start logging threads
@@ -148,8 +160,11 @@ async def connect():
     
     Returns connection details for the frontend to join the same room.
     The bot joins the room as a participant and handles voice interaction.
+    
+    NOTE: This endpoint mimics the Pipecat Cloud /start endpoint response format
+    for compatibility with the frontend.
     """
-    logger.info("New connection request")
+    logger.info("New connection request (local development mode)")
     
     # Create Daily room
     room = await create_daily_room()
@@ -164,7 +179,7 @@ async def connect():
     bot_pid = launch_bot_process(room_url, room_name)
     
     # Return connection details for the client
-    # DailyTransport expects room_url (or url) and token
+    # Format matches Pipecat Cloud response for frontend compatibility
     return JSONResponse({
         "room_url": room_url,
         "token": user_token,
@@ -174,16 +189,18 @@ async def connect():
 @app.get("/health")
 async def health():
     """Health check endpoint"""
-    return {"status": "ok", "service": "zero-me-pipecat"}
+    return {"status": "ok", "service": "zero-me-local", "mode": "development"}
 
 
 @app.get("/")
 async def root():
     """Root endpoint with API info"""
     return {
-        "service": "Zero Me - Pipecat Voice Assistant",
+        "service": "Zero Me - Local Development Server",
+        "mode": "development",
+        "note": "For production, deploy to Pipecat Cloud instead",
         "endpoints": {
-            "/connect": "POST - Create a new voice session",
+            "/connect": "POST - Create a new voice session (local)",
             "/health": "GET - Health check",
         }
     }
@@ -192,9 +209,19 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     
+    logger.info("=" * 50)
+    logger.info("LOCAL DEVELOPMENT MODE")
+    logger.info("For production, deploy to Pipecat Cloud instead")
+    logger.info("=" * 50)
+    
     if not DAILY_API_KEY:
         logger.error("DAILY_API_KEY not found in .env.local")
         logger.error("Get your API key from https://dashboard.daily.co/developers")
+        logger.error("")
+        logger.error("Or deploy to Pipecat Cloud for free integrated Daily:")
+        logger.error("  1. pipecat cloud docker build-push")
+        logger.error("  2. pipecat cloud deploy")
+        logger.error("  3. pipecat cloud agent start zero-me --use-daily")
         sys.exit(1)
     
     google_key = os.getenv("GOOGLE_API_KEY")
@@ -204,7 +231,7 @@ if __name__ == "__main__":
         logger.info("GOOGLE_API_KEY found")
     
     port = int(os.getenv("PORT", "8080"))
-    logger.info(f"Starting Pipecat connect server on http://localhost:{port}")
+    logger.info(f"Starting local development server on http://localhost:{port}")
     logger.info(f"Connect endpoint: http://localhost:{port}/connect")
     
     uvicorn.run(app, host="0.0.0.0", port=port)

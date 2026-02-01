@@ -18,7 +18,14 @@ interface UsePipecatAgentReturn {
   setMicEnabled: (enabled: boolean) => void;
 }
 
-const CONNECT_ENDPOINT = import.meta.env.VITE_PIPECAT_CONNECT_ENDPOINT || 'http://localhost:8080/connect';
+// Configuration for Pipecat Cloud vs Local mode
+const PIPECAT_MODE = import.meta.env.VITE_PIPECAT_MODE || 'cloud';
+const PIPECAT_CLOUD_AGENT_NAME = import.meta.env.VITE_PIPECAT_CLOUD_AGENT_NAME || 'zero-me-assistant';
+const PIPECAT_CLOUD_API_KEY = import.meta.env.VITE_PIPECAT_CLOUD_API_KEY || '';
+const LOCAL_CONNECT_ENDPOINT = import.meta.env.VITE_PIPECAT_CONNECT_ENDPOINT || 'http://localhost:8080/connect';
+
+// Pipecat Cloud API endpoint
+const PIPECAT_CLOUD_API_URL = 'https://api.pipecat.daily.co/v1/public';
 
 export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipecatAgentReturn {
   const { onStatusChange, onVolumeChange } = options;
@@ -28,8 +35,6 @@ export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipeca
   const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
   const [userVolume, setUserVolume] = useState(0);
 
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const volumeIntervalRef = useRef<number | null>(null);
   const clientRef = useRef<PipecatClient | null>(null);
 
@@ -38,31 +43,13 @@ export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipeca
     onStatusChange?.(status);
   }, [onStatusChange]);
 
-  // Monitor microphone volume for visualization
-  const startVolumeMonitoring = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new AudioContext();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      source.connect(analyserRef.current);
-      analyserRef.current.fftSize = 256;
-
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-
-      volumeIntervalRef.current = window.setInterval(() => {
-        if (analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          const normalized = average / 255;
-          setUserVolume(normalized);
-          onVolumeChange?.(normalized);
-        }
-      }, 50);
-    } catch (error) {
-      console.error('Failed to access microphone:', error);
-    }
+  // Simple volume simulation for UI visualization
+  const startVolumeMonitoring = useCallback(() => {
+    volumeIntervalRef.current = window.setInterval(() => {
+      const simulatedVolume = 0.3 + Math.random() * 0.2;
+      setUserVolume(simulatedVolume);
+      onVolumeChange?.(simulatedVolume);
+    }, 100);
   }, [onVolumeChange]);
 
   const stopVolumeMonitoring = useCallback(() => {
@@ -70,29 +57,89 @@ export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipeca
       clearInterval(volumeIntervalRef.current);
       volumeIntervalRef.current = null;
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+    setUserVolume(0);
+  }, []);
+
+  /**
+   * Connect using Pipecat Cloud API
+   */
+  const connectPipecatCloud = useCallback(async (): Promise<{ room_url: string; token: string }> => {
+    console.log(`Connecting to Pipecat Cloud agent: ${PIPECAT_CLOUD_AGENT_NAME}`);
+    
+    const response = await fetch(`${PIPECAT_CLOUD_API_URL}/${PIPECAT_CLOUD_AGENT_NAME}/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(PIPECAT_CLOUD_API_KEY && { 'Authorization': `Bearer ${PIPECAT_CLOUD_API_KEY}` }),
+      },
+      body: JSON.stringify({
+        createDailyRoom: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to start Pipecat Cloud session: ${error}`);
     }
+
+    const data = await response.json();
+    return {
+      room_url: data.dailyRoom,
+      token: data.dailyToken,
+    };
+  }, []);
+
+  /**
+   * Connect using local self-hosted server
+   */
+  const connectLocal = useCallback(async (): Promise<{ room_url: string; token: string }> => {
+    console.log(`Connecting to local server: ${LOCAL_CONNECT_ENDPOINT}`);
+    
+    const response = await fetch(LOCAL_CONNECT_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to connect to local server: ${error}`);
+    }
+
+    return await response.json();
   }, []);
 
   const connect = useCallback(async () => {
     updateStatus('connecting');
 
     try {
+      // Get room URL and token based on mode
+      let connectionData: { room_url: string; token: string };
+      
+      if (PIPECAT_MODE === 'cloud') {
+        connectionData = await connectPipecatCloud();
+      } else {
+        connectionData = await connectLocal();
+      }
+
+      console.log('Got connection data, joining Daily room...');
+
+      // Create Pipecat client with Daily transport
+      // Audio playback is handled by PipecatClientAudio component from @pipecat-ai/client-react
       const pcClient = new PipecatClient({
         transport: new DailyTransport(),
         enableMic: true,
         enableCam: false,
         callbacks: {
           onConnected: () => {
-            console.log('Connected to Pipecat/Daily');
+            console.log('Connected to Daily room');
             setIsConnected(true);
             updateStatus('listening');
             startVolumeMonitoring();
           },
           onDisconnected: () => {
-            console.log('Disconnected from Pipecat/Daily');
+            console.log('Disconnected from Daily room');
             setIsConnected(false);
             updateStatus('idle');
             stopVolumeMonitoring();
@@ -117,13 +164,12 @@ export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipeca
           },
           onUserStartedSpeaking: () => {
             console.log('User started speaking');
-            // Could update to a 'user-speaking' state if needed
           },
           onUserStoppedSpeaking: () => {
             console.log('User stopped speaking');
             updateStatus('thinking');
           },
-          onError: (error: Error) => {
+          onError: (error: unknown) => {
             console.error('Pipecat error:', error);
             updateStatus('error');
           },
@@ -133,9 +179,10 @@ export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipeca
       // Store ref for mic control
       clientRef.current = pcClient;
 
-      // Connect via the connect endpoint
-      await pcClient.startBotAndConnect({
-        endpoint: CONNECT_ENDPOINT,
+      // Connect to the Daily room
+      await pcClient.connect({
+        url: connectionData.room_url,
+        token: connectionData.token,
       });
 
       setClient(pcClient);
@@ -144,7 +191,7 @@ export function usePipecatAgent(options: UsePipecatAgentOptions = {}): UsePipeca
       updateStatus('error');
       throw error;
     }
-  }, [updateStatus, startVolumeMonitoring, stopVolumeMonitoring]);
+  }, [updateStatus, startVolumeMonitoring, stopVolumeMonitoring, connectPipecatCloud, connectLocal]);
 
   const disconnect = useCallback(() => {
     if (clientRef.current) {
