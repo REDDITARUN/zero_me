@@ -1,19 +1,69 @@
+# ============================================
+# CORE - Pipecat Voice Pipeline
+# ============================================
+
 # Pipecat core framework with Google Gemini Live and Silero VAD
 # The base pipecat-ai package includes runner utilities for Pipecat Cloud
 pipecat-ai[google,silero]>=0.0.100
 
-# Environment
+# Daily transport for WebRTC audio
+pipecat-ai[daily]>=0.0.100
+
+# Environment management
 python-dotenv>=1.0.0
 
 # Logging
 loguru>=0.7.0
 
 # ============================================
-# LOCAL DEVELOPMENT - Web server for connect endpoint
+# LOCAL DEVELOPMENT - Web server
 # ============================================
+
 fastapi>=0.115.0
 uvicorn>=0.32.0
 httpx>=0.27.0
 
-# Daily transport for WebRTC audio
-pipecat-ai[daily]>=0.0.100
+# ============================================
+# LANGCHAIN - Agent Framework
+# ============================================
+
+# LangChain core
+langchain>=0.3.0
+langchain-core>=0.3.0
+
+# LangGraph for agent orchestration
+langgraph>=0.2.0
+
+# Google Gemini integration for LangChain
+# Uses the new google-genai SDK
+langchain-google-genai>=2.0.0
+
+# ============================================
+# INTEGRATIONS
+# ============================================
+
+# Notion API client for Doc, Todo, Calendar
+notion-client>=2.2.0
+
+# Resend for email (simple API, no OAuth needed)
+resend>=2.0.0
+
+# Redis for memory storage
+redis>=5.0.0
+
+# ============================================
+# MONITORING & ANALYTICS
+# ============================================
+
+# Weights & Biases for continual learning monitoring
+wandb>=0.18.0
+
+# ============================================
+# UTILITIES
+# ============================================
+
+# Async utilities
+aiohttp>=3.9.0
+
+# Pydantic for data validation
+pydantic>=2.0.0
