@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { Room, RoomEvent, Track, ConnectionState, RemoteParticipant, LocalParticipant } from 'livekit-client';
+import { PipecatClient } from '@pipecat-ai/client-js';
+import { DailyTransport } from '@pipecat-ai/daily-transport';
+import { PipecatClientProvider, PipecatClientAudio } from '@pipecat-ai/client-react';
 
 export type AgentStatus = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'paused' | 'error';
 
@@ -32,20 +34,16 @@ declare global {
   }
 }
 
-// LiveKit connection config - UPDATE THESE or use env vars
-const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || 'wss://demo-jxnrd0np.livekit.cloud';
-const LIVEKIT_TOKEN_ENDPOINT = import.meta.env.VITE_TOKEN_ENDPOINT || null;
+// Pipecat connect endpoint
+const PIPECAT_CONNECT_ENDPOINT = import.meta.env.VITE_PIPECAT_CONNECT_ENDPOINT || 'http://localhost:8080/connect';
 
 export function AgentProvider({ children }: { children: ReactNode }) {
   const [status, setStatusInternal] = useState<AgentStatus>('idle');
   const [volume, setVolumeInternal] = useState(0);
-  const roomRef = useRef<Room | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  const [client, setClient] = useState<PipecatClient | null>(null);
+  const clientRef = useRef<PipecatClient | null>(null);
   const volumeIntervalRef = useRef<number | null>(null);
-  const previewStatusRef = useRef<AgentStatus>('listening'); // Status before pause
-  const audioElementsRef = useRef<HTMLAudioElement[]>([]); // Track audio elements
-  const isPausedRef = useRef(false); // Track paused state for closures
+  const micEnabledRef = useRef<boolean>(true);
 
   const setStatus = useCallback((newStatus: AgentStatus) => {
     setStatusInternal(newStatus);
@@ -56,44 +54,15 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     setVolumeInternal(newVolume);
   }, []);
 
-  // Fetch token from endpoint or use sandbox
-  const getToken = async (): Promise<string> => {
-    if (LIVEKIT_TOKEN_ENDPOINT) {
-      const response = await fetch(LIVEKIT_TOKEN_ENDPOINT);
-      const data = await response.json();
-      return data.token;
-    }
-    
-    // Use LiveKit Cloud Sandbox for development
-    // Go to: https://cloud.livekit.io/projects/p_/sandbox
-    // Create a token server sandbox and get the endpoint
-    throw new Error('No token endpoint configured. Set VITE_TOKEN_ENDPOINT in frontend/.env.local or use LiveKit Cloud Sandbox.');
-  };
-
   // Monitor local audio for visualization
+  // Note: AudioContext is disabled to avoid conflicts with Daily's WebRTC audio
   const startVolumeMonitoring = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContextRef.current = new AudioContext();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      source.connect(analyserRef.current);
-      analyserRef.current.fftSize = 256;
-      
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-      
-      volumeIntervalRef.current = window.setInterval(() => {
-        if (analyserRef.current) {
-          analyserRef.current.getByteFrequencyData(dataArray);
-          const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-          const normalized = average / 255;
-          setVolume(normalized);
-        }
-      }, 50);
-    } catch (error) {
-      console.error('Failed to access microphone:', error);
-    }
+    console.log('Volume monitoring started (simulated to avoid AudioContext conflicts)');
+    // Simple fallback: simulate volume activity when connected
+    volumeIntervalRef.current = window.setInterval(() => {
+      const simulatedVolume = 0.3 + Math.random() * 0.2;
+      setVolume(simulatedVolume);
+    }, 100);
   }, [setVolume]);
 
   const stopVolumeMonitoring = useCallback(() => {
@@ -101,11 +70,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       clearInterval(volumeIntervalRef.current);
       volumeIntervalRef.current = null;
     }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-  }, []);
+    setVolume(0);
+  }, [setVolume]);
 
   const start = useCallback(async () => {
     setStatus('connecting');
@@ -113,106 +79,61 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     window.electronAPI?.minimizeDashboard();
 
     try {
-      const token = await getToken();
-      
-      const room = new Room({
-        adaptiveStream: true,
-        dynacast: true,
+      const pcClient = new PipecatClient({
+        transport: new DailyTransport(),
+        enableMic: true,
+        enableCam: false,
+        callbacks: {
+          onConnected: () => {
+            console.log('✅ Connected to Pipecat/Daily');
+            setStatus('listening');
+            startVolumeMonitoring();
+          },
+          onDisconnected: () => {
+            console.log('❌ Disconnected from Pipecat/Daily');
+            setStatus('idle');
+            stopVolumeMonitoring();
+          },
+          onBotConnected: () => {
+            console.log('🤖 Bot connected to session');
+          },
+          onBotDisconnected: () => {
+            console.log('🤖 Bot disconnected from session');
+          },
+          onBotReady: () => {
+            console.log('🤖 Bot is ready');
+            setStatus('listening');
+          },
+          onBotStartedSpeaking: () => {
+            console.log('🔊 Bot started speaking');
+            setStatus('speaking');
+          },
+          onBotStoppedSpeaking: () => {
+            console.log('🔇 Bot stopped speaking');
+            setStatus('listening');
+          },
+          onUserStartedSpeaking: () => {
+            console.log('🎤 User started speaking');
+          },
+          onUserStoppedSpeaking: () => {
+            console.log('🎤 User stopped speaking');
+            setStatus('thinking');
+          },
+          onError: (error: Error) => {
+            console.error('❌ Pipecat error:', error);
+            setStatus('error');
+          },
+        },
       });
 
-      // Connection events
-      room.on(RoomEvent.Connected, () => {
-        console.log('✅ Connected to LiveKit room');
-        setStatus('listening');
-        startVolumeMonitoring();
+      // Connect to the bot via the connect endpoint
+      await pcClient.startBotAndConnect({
+        endpoint: PIPECAT_CONNECT_ENDPOINT,
       });
 
-      room.on(RoomEvent.Disconnected, () => {
-        console.log('❌ Disconnected from room');
-        setStatus('idle');
-        stopVolumeMonitoring();
-      });
-
-      // Helper to monitor agent state
-      const monitorAgentState = (participant: RemoteParticipant) => {
-        const checkAgentState = () => {
-          const agentState = participant.attributes?.['lk.agent.state'];
-          if (!agentState) return;
-          
-          const mappedStatus: AgentStatus = agentState === 'speaking' ? 'speaking' 
-            : agentState === 'thinking' ? 'thinking' 
-            : agentState === 'initializing' ? 'connecting'
-            : 'listening';
-          
-          // If paused, store for resume but don't change UI status
-          if (isPausedRef.current) {
-            previewStatusRef.current = mappedStatus;
-            return;
-          }
-          
-          console.log('🤖 Agent state changed:', agentState);
-          setStatus(mappedStatus);
-        };
-
-        // Check initial state
-        checkAgentState();
-        
-        // Listen for changes
-        participant.on('attributesChanged', () => {
-          checkAgentState();
-        });
-      };
-
-      // Agent participant events
-      room.on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
-        console.log('👤 Participant connected:', participant.identity);
-        
-        // Check if this is an agent (identity starts with 'agent-')
-        if (participant.identity.startsWith('agent-')) {
-          console.log('🤖 Agent joined the room');
-          monitorAgentState(participant);
-        }
-      });
-
-      // Also check existing participants when we connect (agent might already be there)
-      room.on(RoomEvent.Connected, () => {
-        room.remoteParticipants.forEach((participant) => {
-          if (participant.identity.startsWith('agent-')) {
-            console.log('🤖 Found existing agent in room');
-            monitorAgentState(participant);
-          }
-        });
-      });
-
-      // Handle agent audio
-      room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-        console.log('🎵 Track subscribed:', track.kind, 'from', participant.identity);
-        
-        if (track.kind === Track.Kind.Audio) {
-          const element = track.attach() as HTMLAudioElement;
-          element.id = `audio-${participant.identity}`;
-          document.body.appendChild(element);
-          // Keep track of audio elements for pause/resume
-          audioElementsRef.current.push(element);
-          console.log('🔊 Audio attached');
-        }
-      });
-
-      room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        const detached = track.detach();
-        detached.forEach(el => {
-          // Remove from our tracking array
-          audioElementsRef.current = audioElementsRef.current.filter(a => a !== el);
-          el.remove();
-        });
-      });
-
-      // Connect
-      await room.connect(LIVEKIT_URL, token);
-      console.log('🎤 Enabling microphone...');
-      await room.localParticipant.setMicrophoneEnabled(true);
-      
-      roomRef.current = room;
+      clientRef.current = pcClient;
+      setClient(pcClient);  // Trigger re-render for PipecatClientProvider
+      micEnabledRef.current = true;
 
     } catch (error) {
       console.error('Failed to connect:', error);
@@ -220,52 +141,25 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       window.electronAPI?.showDashboard();
       
       // Show helpful error
-      alert(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\nMake sure you have VITE_TOKEN_ENDPOINT set in frontend/.env.local`);
+      alert(`Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}\n\nMake sure the backend server is running at ${PIPECAT_CONNECT_ENDPOINT}`);
     }
   }, [setStatus, startVolumeMonitoring, stopVolumeMonitoring]);
 
   const pause = useCallback(async () => {
-    if (!roomRef.current) return;
-
-    if (status === 'paused') {
-      // Resume: unmute mic and audio
-      console.log('▶️ Resuming...');
-      isPausedRef.current = false;
-      
-      await roomRef.current.localParticipant.setMicrophoneEnabled(true);
-      
-      // Unmute all agent audio
-      audioElementsRef.current.forEach(el => {
-        el.muted = false;
-      });
-      
-      // Restore previous status
-      setStatus(previewStatusRef.current);
-    } else {
-      // Pause: mute mic and audio
-      console.log('⏸️ Pausing...');
-      isPausedRef.current = true;
-      previewStatusRef.current = status; // Save current status
-      
-      await roomRef.current.localParticipant.setMicrophoneEnabled(false);
-      
-      // Mute all agent audio
-      audioElementsRef.current.forEach(el => {
-        el.muted = true;
-      });
-      
-      setStatus('paused');
+    if (clientRef.current) {
+      // Toggle mic enabled state
+      micEnabledRef.current = !micEnabledRef.current;
+      clientRef.current.enableMic(micEnabledRef.current);
+      setStatus(micEnabledRef.current ? 'listening' : 'paused');
     }
-  }, [status, setStatus]);
+  }, [setStatus]);
 
   const stop = useCallback(() => {
-    if (roomRef.current) {
-      roomRef.current.disconnect();
-      roomRef.current = null;
+    if (clientRef.current) {
+      clientRef.current.disconnect();
+      clientRef.current = null;
+      setClient(null);  // Clear client state
     }
-    // Reset state
-    audioElementsRef.current = [];
-    isPausedRef.current = false;
     stopVolumeMonitoring();
     setStatus('idle');
     window.electronAPI?.hideBlob();
@@ -274,7 +168,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   const isActive = status !== 'idle' && status !== 'error';
 
-  // Listen for global shortcut commands
+  // Listen for global shortcut commands from Electron
   useEffect(() => {
     window.electronAPI?.onAgentControl((command) => {
       switch (command) {
@@ -304,8 +198,8 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (roomRef.current) {
-        roomRef.current.disconnect();
+      if (clientRef.current) {
+        clientRef.current.disconnect();
       }
       stopVolumeMonitoring();
     };
@@ -313,7 +207,15 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
   return (
     <AgentContext.Provider value={{ status, setStatus, volume, setVolume, start, pause, stop, isActive }}>
-      {children}
+      {client ? (
+        <PipecatClientProvider client={client}>
+          {/* PipecatClientAudio handles bot audio playback automatically */}
+          <PipecatClientAudio />
+          {children}
+        </PipecatClientProvider>
+      ) : (
+        children
+      )}
     </AgentContext.Provider>
   );
 }

@@ -1,13 +1,19 @@
-# LiveKit Agents framework
-livekit-agents>=1.3.0
-
-# LiveKit API (for token generation)
-livekit-api>=0.7.0
-
-# LiveKit plugins used in demo.py
-livekit-plugins-noise-cancellation
-livekit-plugins-silero
-livekit-plugins-turn-detector
+# Pipecat core framework with Google Gemini Live and Silero VAD
+# The base pipecat-ai package includes runner utilities for Pipecat Cloud
+pipecat-ai[google,silero]>=0.0.100
 
 # Environment
 python-dotenv>=1.0.0
+
+# Logging
+loguru>=0.7.0
+
+# ============================================
+# LOCAL DEVELOPMENT - Web server for connect endpoint
+# ============================================
+fastapi>=0.115.0
+uvicorn>=0.32.0
+httpx>=0.27.0
+
+# Daily transport for WebRTC audio
+pipecat-ai[daily]>=0.0.100

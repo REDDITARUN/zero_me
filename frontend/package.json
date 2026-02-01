@@ -1,7 +1,7 @@
 {
   "name": "zero-me",
   "version": "0.1.0",
-  "description": "Floating voice assistant with LiveKit",
+  "description": "Floating voice assistant with Pipecat",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
@@ -11,9 +11,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@livekit/components-react": "^2.7.0",
-    "@livekit/components-styles": "^1.1.0",
-    "livekit-client": "^2.7.0",
+    "@pipecat-ai/client-js": "^1.0.0",
+    "@pipecat-ai/client-react": "^1.1.0",
+    "@pipecat-ai/daily-transport": "^1.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
