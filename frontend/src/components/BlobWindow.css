@@ -7,10 +7,27 @@
   align-items: center;
   justify-content: center;
   background: transparent;
-  overflow: visible;
+  overflow: hidden;
   
   /* Allow dragging the window by the blob */
   -webkit-app-region: drag;
+}
+
+/* Ensure transparency and no scrollbars in blob mode */
+.blob-window,
+.blob-window html,
+.blob-window body,
+.blob-window #root {
+  overflow: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.blob-window::-webkit-scrollbar,
+.blob-window *::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 /* Ensure transparency works in Electron */
@@ -20,4 +37,5 @@ html, body, #root {
 
 body.blob-mode {
   background: transparent !important;
+  overflow: hidden !important;
 }

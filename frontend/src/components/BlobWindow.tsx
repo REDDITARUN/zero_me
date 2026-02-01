@@ -7,6 +7,19 @@ export default function BlobWindow() {
   const { status, volume } = useAgent();
   const [simulatedVolume, setSimulatedVolume] = useState(0);
 
+  // Hide scrollbars and set blob mode on body
+  useEffect(() => {
+    document.body.classList.add('blob-mode');
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    
+    return () => {
+      document.body.classList.remove('blob-mode');
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, []);
+
   // Simulate volume fluctuations for demo (replace with real audio analysis)
   useEffect(() => {
     if (status === 'listening' || status === 'speaking') {
@@ -23,19 +36,8 @@ export default function BlobWindow() {
     }
   }, [status]);
 
-  // For demo, cycle through states
-  useEffect(() => {
-    if (status === 'listening') {
-      const timeout = setTimeout(() => {
-        // This would be triggered by actual voice detection
-        // For demo, we cycle back
-      }, 5000);
-      return () => clearTimeout(timeout);
-    }
-  }, [status]);
-
   return (
-    <div className="blob-window">
+    <div className="blob-window" style={{ overflow: 'hidden' }}>
       <Blob 
         status={status} 
         volume={volume > 0 ? volume : simulatedVolume} 

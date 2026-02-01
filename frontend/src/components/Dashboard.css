@@ -305,6 +305,15 @@
   background: #f0c88a;
 }
 
+.btn-resume {
+  background: var(--listening-green);
+  color: white;
+}
+
+.btn-resume:hover:not(:disabled) {
+  background: #6bc494;
+}
+
 .btn-stop {
   background: var(--bg-tertiary);
   color: var(--text-secondary);

@@ -100,7 +100,7 @@ export default function Dashboard() {
         <div className="controls-hint">
           <span className="hint-key">⌘⇧S</span> Start
           <span className="hint-divider">·</span>
-          <span className="hint-key">⌘⇧P</span> Pause
+          <span className="hint-key">⌘⇧P</span> {status === 'paused' ? 'Resume' : 'Pause'}
           <span className="hint-divider">·</span>
           <span className="hint-key">⌘⇧X</span> Stop
         </div>
@@ -118,15 +118,26 @@ export default function Dashboard() {
           </button>
           
           <button 
-            className="btn-control btn-pause"
+            className={`btn-control ${status === 'paused' ? 'btn-resume' : 'btn-pause'}`}
             onClick={pause}
-            disabled={!isActive || status === 'paused'}
+            disabled={!isActive}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="3" y="2" width="4" height="12" rx="1"/>
-              <rect x="9" y="2" width="4" height="12" rx="1"/>
-            </svg>
-            Pause
+            {status === 'paused' ? (
+              <>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4 2.5v11l9-5.5-9-5.5z"/>
+                </svg>
+                Resume
+              </>
+            ) : (
+              <>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="3" y="2" width="4" height="12" rx="1"/>
+                  <rect x="9" y="2" width="4" height="12" rx="1"/>
+                </svg>
+                Pause
+              </>
+            )}
           </button>
           
           <button 
