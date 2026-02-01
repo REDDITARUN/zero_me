@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from memory import get_memory_manager
 from analytics import get_analytics_manager
+from tools.logging_utils import log_tool_call, log_tool_result, log_memory_operation
 
 
 # Default user ID for single-user mode
@@ -42,14 +43,17 @@ def store_memory(context_key: str, context_value: str, user_id: Optional[str] = 
         - store_memory("timezone", "America/New_York") -> Remembers user's timezone
         - store_memory("project_focus", "Building a mobile app") -> Remembers current project
     """
-    logger.info(f"🔧 TOOL CALLED: store_memory(key='{context_key}', value='{context_value[:50]}...')")
+    log_tool_call("store_memory", {"key": context_key, "value": context_value[:50] + "..." if len(context_value) > 50 else context_value})
+    
     memory = get_memory_manager()
     analytics = get_analytics_manager()
     
     uid = user_id or DEFAULT_USER_ID
     
     if not memory.is_available():
-        return "Memory storage is currently unavailable (Redis not connected)."
+        result = "Memory storage is currently unavailable (Redis not connected)."
+        log_tool_result("store_memory", result, success=False)
+        return result
     
     success = memory.store_context(uid, context_key, context_value)
     
@@ -57,10 +61,14 @@ def store_memory(context_key: str, context_value: str, user_id: Optional[str] = 
     analytics.log_memory_operation("store", uid, context_key, success)
     
     if success:
-        logger.info(f"Stored memory: {context_key} for user {uid}")
-        return f"I'll remember that: {context_key} = {context_value}"
+        log_memory_operation("STORE", context_key, context_value)
+        result = f"I'll remember that: {context_key} = {context_value}"
+        log_tool_result("store_memory", result, success=True)
+        return result
     else:
-        return "Failed to store memory. Please try again."
+        result = "Failed to store memory. Please try again."
+        log_tool_result("store_memory", result, success=False)
+        return result
 
 
 @tool
@@ -75,37 +83,46 @@ def retrieve_memory(context_key: Optional[str] = None, user_id: Optional[str] = 
     Returns:
         Retrieved context or message if not found
     """
-    logger.info(f"🔧 TOOL CALLED: retrieve_memory(key='{context_key}')")
+    log_tool_call("retrieve_memory", {"key": context_key or "ALL"})
+    
     memory = get_memory_manager()
     analytics = get_analytics_manager()
     
     uid = user_id or DEFAULT_USER_ID
     
     if not memory.is_available():
-        return "Memory storage is currently unavailable (Redis not connected)."
+        result = "Memory storage is currently unavailable (Redis not connected)."
+        log_tool_result("retrieve_memory", result, success=False)
+        return result
     
-    result = memory.retrieve_context(uid, context_key)
+    data = memory.retrieve_context(uid, context_key)
     
     # Log to analytics
-    analytics.log_memory_operation("retrieve", uid, context_key or "all", result is not None)
+    analytics.log_memory_operation("retrieve", uid, context_key or "all", data is not None)
     
-    if result is None:
+    if data is None:
         if context_key:
-            return f"I don't have any memory stored for '{context_key}'."
-        return "No memories stored yet."
+            result = f"I don't have any memory stored for '{context_key}'."
+        else:
+            result = "No memories stored yet."
+        log_tool_result("retrieve_memory", result, success=True)
+        return result
     
     if context_key:
-        return f"I remember: {context_key} = {result.get('value')}"
+        log_memory_operation("RETRIEVE", context_key, data.get('value'))
+        result = f"I remember: {context_key} = {data.get('value')}"
     else:
         # Format all memories
-        if not result:
-            return "No memories stored yet."
-        
-        memories = []
-        for key, data in result.items():
-            memories.append(f"- {key}: {data.get('value')}")
-        
-        return "Here's what I remember:\n" + "\n".join(memories)
+        if not data:
+            result = "No memories stored yet."
+        else:
+            memories = []
+            for key, val in data.items():
+                memories.append(f"- {key}: {val.get('value')}")
+            result = "Here's what I remember:\n" + "\n".join(memories)
+    
+    log_tool_result("retrieve_memory", result, success=True)
+    return result
 
 
 @tool
@@ -120,24 +137,31 @@ def search_memory(query: str, user_id: Optional[str] = None) -> str:
     Returns:
         Matching memories or message if none found
     """
-    logger.info(f"🔧 TOOL CALLED: search_memory(query='{query}')")
+    log_tool_call("search_memory", {"query": query})
+    
     memory = get_memory_manager()
     
     uid = user_id or DEFAULT_USER_ID
     
     if not memory.is_available():
-        return "Memory storage is currently unavailable (Redis not connected)."
+        result = "Memory storage is currently unavailable (Redis not connected)."
+        log_tool_result("search_memory", result, success=False)
+        return result
     
     results = memory.search_context(uid, query)
     
     if not results:
-        return f"No memories found matching '{query}'."
+        result = f"No memories found matching '{query}'."
+        log_tool_result("search_memory", result, success=True)
+        return result
     
     memories = []
     for item in results:
         memories.append(f"- {item.get('key')}: {item.get('value')}")
     
-    return f"Found {len(results)} matching memories:\n" + "\n".join(memories)
+    result = f"Found {len(results)} matching memories:\n" + "\n".join(memories)
+    log_tool_result("search_memory", result, success=True)
+    return result
 
 
 @tool
@@ -152,14 +176,17 @@ def delete_memory(context_key: str, user_id: Optional[str] = None) -> str:
     Returns:
         Success or error message
     """
-    logger.info(f"🔧 TOOL CALLED: delete_memory(key='{context_key}')")
+    log_tool_call("delete_memory", {"key": context_key})
+    
     memory = get_memory_manager()
     analytics = get_analytics_manager()
     
     uid = user_id or DEFAULT_USER_ID
     
     if not memory.is_available():
-        return "Memory storage is currently unavailable (Redis not connected)."
+        result = "Memory storage is currently unavailable (Redis not connected)."
+        log_tool_result("delete_memory", result, success=False)
+        return result
     
     success = memory.delete_context(uid, context_key)
     
@@ -167,9 +194,14 @@ def delete_memory(context_key: str, user_id: Optional[str] = None) -> str:
     analytics.log_memory_operation("delete", uid, context_key, success)
     
     if success:
-        return f"Deleted memory: {context_key}"
+        log_memory_operation("DELETE", context_key)
+        result = f"Deleted memory: {context_key}"
+        log_tool_result("delete_memory", result, success=True)
+        return result
     else:
-        return f"Failed to delete memory '{context_key}'. It may not exist."
+        result = f"Failed to delete memory '{context_key}'. It may not exist."
+        log_tool_result("delete_memory", result, success=False)
+        return result
 
 
 @tool
@@ -184,18 +216,23 @@ def get_conversation_history(limit: int = 5, user_id: Optional[str] = None) -> s
     Returns:
         Recent conversation summaries
     """
-    logger.info(f"🔧 TOOL CALLED: get_conversation_history(limit={limit})")
+    log_tool_call("get_conversation_history", {"limit": limit})
+    
     memory = get_memory_manager()
     
     uid = user_id or DEFAULT_USER_ID
     
     if not memory.is_available():
-        return "Memory storage is currently unavailable (Redis not connected)."
+        result = "Memory storage is currently unavailable (Redis not connected)."
+        log_tool_result("get_conversation_history", result, success=False)
+        return result
     
     conversations = memory.get_recent_conversations(uid, limit)
     
     if not conversations:
-        return "No conversation history found."
+        result = "No conversation history found."
+        log_tool_result("get_conversation_history", result, success=True)
+        return result
     
     summaries = []
     for i, conv in enumerate(conversations, 1):
@@ -204,4 +241,6 @@ def get_conversation_history(limit: int = 5, user_id: Optional[str] = None) -> s
         questions = conv.get("questions_asked", 0)
         summaries.append(f"{i}. {topic} ({timestamp}) - {questions} questions asked")
     
-    return f"Recent {len(conversations)} conversations:\n" + "\n".join(summaries)
+    result = f"Recent {len(conversations)} conversations:\n" + "\n".join(summaries)
+    log_tool_result("get_conversation_history", result, success=True)
+    return result

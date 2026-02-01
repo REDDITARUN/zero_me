@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from analytics import get_analytics_manager
 from parameters import update_parameter, get_all_parameters
+from tools.logging_utils import log_tool_call, log_tool_result
 
 
 @tool
@@ -28,11 +29,14 @@ def log_metric(metric_name: str, value: float) -> str:
     Returns:
         Confirmation message
     """
-    analytics = get_analytics_manager()
+    log_tool_call("log_metric", {"metric_name": metric_name, "value": value})
     
+    analytics = get_analytics_manager()
     analytics.log_metric(metric_name, value)
     
-    return f"Logged metric: {metric_name} = {value}"
+    result = f"Logged metric: {metric_name} = {value}"
+    log_tool_result("log_metric", result, success=True)
+    return result
 
 
 @tool
@@ -48,8 +52,9 @@ def log_question_count(count: int, conversation_topic: str) -> str:
     Returns:
         Confirmation with analysis
     """
-    analytics = get_analytics_manager()
+    log_tool_call("log_question_count", {"count": count, "topic": conversation_topic})
     
+    analytics = get_analytics_manager()
     analytics.log_metric("questions_per_conversation", count)
     
     # Provide feedback based on count
@@ -62,9 +67,9 @@ def log_question_count(count: int, conversation_topic: str) -> str:
     else:
         feedback = "Many questions asked - this might indicate unclear prompts or need for better context retention."
     
-    logger.info(f"Conversation '{conversation_topic}' had {count} questions")
-    
-    return f"Logged {count} questions for '{conversation_topic}'. Analysis: {feedback}"
+    result = f"Logged {count} questions for '{conversation_topic}'. Analysis: {feedback}"
+    log_tool_result("log_question_count", result, success=True)
+    return result
 
 
 @tool
@@ -88,6 +93,13 @@ def log_parameter_change(
     Returns:
         Confirmation message
     """
+    log_tool_call("log_parameter_change", {
+        "agent": agent_name,
+        "param": parameter_key,
+        "old": old_value,
+        "new": new_value
+    })
+    
     analytics = get_analytics_manager()
     
     analytics.log_parameter_change(
@@ -98,7 +110,9 @@ def log_parameter_change(
         reason=reason,
     )
     
-    return f"Logged parameter change: {agent_name}.{parameter_key} changed from '{old_value}' to '{new_value}'. Reason: {reason}"
+    result = f"Logged parameter change: {agent_name}.{parameter_key} changed from '{old_value}' to '{new_value}'. Reason: {reason}"
+    log_tool_result("log_parameter_change", result, success=True)
+    return result
 
 
 @tool
@@ -123,6 +137,12 @@ def modify_agent_parameter(
     Returns:
         Success or error message
     """
+    log_tool_call("modify_agent_parameter", {
+        "agent": agent_name,
+        "param": parameter_key,
+        "value": new_value
+    })
+    
     analytics = get_analytics_manager()
     
     # Get current parameters to find old value
@@ -154,10 +174,13 @@ def modify_agent_parameter(
             reason=reason,
         )
         
-        logger.info(f"Modified {agent_name}.{parameter_key}: {old_value} -> {typed_value}")
-        return f"Successfully modified {agent_name}.{parameter_key} from {old_value} to {typed_value}. Reason: {reason}"
+        result = f"Successfully modified {agent_name}.{parameter_key} from {old_value} to {typed_value}. Reason: {reason}"
+        log_tool_result("modify_agent_parameter", result, success=True)
+        return result
     else:
-        return f"Failed to modify parameter. Agent '{agent_name}' or parameter '{parameter_key}' may not exist."
+        result = f"Failed to modify parameter. Agent '{agent_name}' or parameter '{parameter_key}' may not exist."
+        log_tool_result("modify_agent_parameter", result, success=False)
+        return result
 
 
 @tool
@@ -171,11 +194,15 @@ def get_current_parameters(agent_name: Optional[str] = None) -> str:
     Returns:
         Formatted parameter information
     """
+    log_tool_call("get_current_parameters", {"agent": agent_name or "ALL"})
+    
     all_params = get_all_parameters()
     
     if agent_name:
         if agent_name not in all_params:
-            return f"Agent '{agent_name}' not found. Available: {', '.join(all_params.keys())}"
+            result = f"Agent '{agent_name}' not found. Available: {', '.join(all_params.keys())}"
+            log_tool_result("get_current_parameters", result, success=False)
+            return result
         
         params = all_params[agent_name]
         config = params.get("config", {})
@@ -185,7 +212,7 @@ def get_current_parameters(agent_name: Optional[str] = None) -> str:
             lines.append(f"  - {key}: {value}")
         lines.append(f"  - prompt_length: {params.get('prompt_length', 0)} chars")
         
-        return "\n".join(lines)
+        result = "\n".join(lines)
     else:
         lines = ["All agent parameters:"]
         for name, params in all_params.items():
@@ -194,7 +221,10 @@ def get_current_parameters(agent_name: Optional[str] = None) -> str:
             for key, value in config.items():
                 lines.append(f"  - {key}: {value}")
         
-        return "\n".join(lines)
+        result = "\n".join(lines)
+    
+    log_tool_result("get_current_parameters", f"Retrieved params for {agent_name or 'all agents'}", success=True)
+    return result
 
 
 @tool
@@ -218,6 +248,12 @@ def record_conversation_analytics(
     Returns:
         Confirmation message
     """
+    log_tool_call("record_conversation_analytics", {
+        "questions": questions_asked,
+        "tasks": tasks_delegated,
+        "duration": f"{duration_seconds:.1f}s"
+    })
+    
     analytics = get_analytics_manager()
     
     topic_list = [t.strip() for t in topics.split(",") if t.strip()]
@@ -230,4 +266,6 @@ def record_conversation_analytics(
         topics=topic_list,
     )
     
-    return f"Recorded conversation: {questions_asked} questions, {tasks_delegated} tasks, {duration_seconds:.1f}s, topics: {topics}"
+    result = f"Recorded conversation: {questions_asked} questions, {tasks_delegated} tasks, {duration_seconds:.1f}s, topics: {topics}"
+    log_tool_result("record_conversation_analytics", result, success=True)
+    return result

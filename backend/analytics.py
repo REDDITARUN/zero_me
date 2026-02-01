@@ -1,6 +1,13 @@
 """
 Zero Me - WandB Analytics Manager
 Tracks parameter changes, question counts, and memory changes for continual learning
+
+All logging happens automatically when:
+1. A session starts
+2. A conversation ends
+3. Parameters change
+4. Memory operations occur
+5. Agent calls complete
 """
 
 import os
@@ -27,6 +34,8 @@ class AnalyticsManager:
     - Question counts per conversation
     - Memory/context changes
     - Model performance metrics
+    - Session metrics
+    - Topics and conversation patterns
     """
     
     def __init__(self):
@@ -39,6 +48,7 @@ class AnalyticsManager:
             "total_tasks_delegated": 0,
             "parameter_changes": 0,
             "memory_stores": 0,
+            "session_start_time": None,
         }
         
         if self.enabled:
@@ -70,6 +80,22 @@ class AnalyticsManager:
             logger.error(f"Failed to initialize WandB: {e}")
             self.enabled = False
     
+    def log_session_start(self, session_number: int):
+        """Log the start of a new session."""
+        self.session_metrics["session_start_time"] = datetime.utcnow()
+        
+        if not self.enabled or not self.run:
+            return
+        
+        try:
+            wandb.log({
+                "session/number": session_number,
+                "session/started_at": datetime.utcnow().isoformat(),
+            })
+            logger.info(f"Session {session_number} start logged to WandB")
+        except Exception as e:
+            logger.error(f"Failed to log session start: {e}")
+    
     def log_metric(self, name: str, value: float, step: Optional[int] = None):
         """
         Log a single metric to WandB.
@@ -87,6 +113,16 @@ class AnalyticsManager:
         except Exception as e:
             logger.error(f"Failed to log metric {name}: {e}")
     
+    def log_custom_metric(self, name: str, value: Any):
+        """Log a custom metric (alias for log_metric)."""
+        if not self.enabled or not self.run:
+            return
+        
+        try:
+            wandb.log({name: value})
+        except Exception as e:
+            logger.error(f"Failed to log custom metric {name}: {e}")
+    
     def log_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None):
         """Log multiple metrics at once."""
         if not self.enabled or not self.run:
@@ -99,11 +135,13 @@ class AnalyticsManager:
     
     def log_conversation_end(
         self,
-        user_id: str,
-        questions_asked: int,
-        tasks_delegated: int,
-        duration_seconds: float,
-        topics: List[str],
+        user_id: str = None,
+        questions_asked: int = 0,
+        tasks_delegated: int = 0,
+        duration_seconds: float = 0,
+        topics: List[str] = None,
+        conversation_id: str = None,
+        summary: str = None,
     ):
         """
         Log metrics at the end of a conversation.
@@ -114,36 +152,52 @@ class AnalyticsManager:
             tasks_delegated: Number of tasks sent to sub-agents
             duration_seconds: Conversation duration
             topics: Main topics discussed
+            conversation_id: Unique conversation ID
+            summary: Conversation summary text
         """
-        if not self.enabled or not self.run:
-            return
+        topics = topics or []
         
         self.session_metrics["total_conversations"] += 1
         self.session_metrics["total_questions_asked"] += questions_asked
         self.session_metrics["total_tasks_delegated"] += tasks_delegated
         
+        if not self.enabled or not self.run:
+            logger.info(f"WandB disabled - Conversation metrics: questions={questions_asked}, tasks={tasks_delegated}")
+            return
+        
         try:
-            wandb.log({
+            metrics = {
                 "conversation/questions_asked": questions_asked,
                 "conversation/tasks_delegated": tasks_delegated,
                 "conversation/duration_seconds": duration_seconds,
                 "conversation/topics_count": len(topics),
                 "session/total_conversations": self.session_metrics["total_conversations"],
-                "session/avg_questions_per_convo": (
+            }
+            
+            if self.session_metrics["total_conversations"] > 0:
+                metrics["session/avg_questions_per_convo"] = (
                     self.session_metrics["total_questions_asked"] / 
                     self.session_metrics["total_conversations"]
-                ),
-            })
+                )
             
-            # Log topics as a table
-            if topics:
-                topic_table = wandb.Table(columns=["topic", "conversation_id"])
-                for topic in topics:
-                    topic_table.add_data(topic, self.session_metrics["total_conversations"])
-                wandb.log({"conversation/topics": topic_table})
+            wandb.log(metrics)
+            logger.info(f"Conversation end logged to WandB: {metrics}")
                 
         except Exception as e:
             logger.error(f"Failed to log conversation end: {e}")
+    
+    def log_topics(self, topics: List[str]):
+        """Log conversation topics as a WandB table."""
+        if not self.enabled or not self.run:
+            return
+        
+        try:
+            topic_table = wandb.Table(columns=["topic", "conversation_id"])
+            for topic in topics:
+                topic_table.add_data(topic, self.session_metrics["total_conversations"])
+            wandb.log({"conversation/topics": topic_table})
+        except Exception as e:
+            logger.error(f"Failed to log topics: {e}")
     
     def log_parameter_change(
         self,
@@ -163,10 +217,11 @@ class AnalyticsManager:
             new_value: New value
             reason: Why the change was made
         """
-        if not self.enabled or not self.run:
-            return
-        
         self.session_metrics["parameter_changes"] += 1
+        
+        if not self.enabled or not self.run:
+            logger.info(f"WandB disabled - Parameter change: {agent_name}.{param_key}: {old_value} -> {new_value}")
+            return
         
         try:
             wandb.log({
@@ -185,6 +240,42 @@ class AnalyticsManager:
         except Exception as e:
             logger.error(f"Failed to log parameter change: {e}")
     
+    def log_parameter_observation(
+        self,
+        metric_name: str,
+        value: Any,
+        observation: str,
+    ):
+        """Log an observation about parameters that might need adjustment."""
+        if not self.enabled or not self.run:
+            logger.info(f"WandB disabled - Parameter observation: {metric_name}={value} - {observation}")
+            return
+        
+        try:
+            wandb.log({
+                f"observation/{metric_name}": value,
+            })
+            
+            # Log observation as an alert
+            wandb.alert(
+                title=f"Parameter Observation: {metric_name}",
+                text=f"{observation}\nValue: {value}",
+                level=wandb.AlertLevel.INFO,
+            )
+        except Exception as e:
+            logger.error(f"Failed to log parameter observation: {e}")
+    
+    def log_parameters_snapshot(self, parameters: Dict[str, Any]):
+        """Log a snapshot of all current parameters."""
+        if not self.enabled or not self.run:
+            return
+        
+        try:
+            wandb.config.update(parameters, allow_val_change=True)
+            logger.debug("Parameters snapshot logged to WandB")
+        except Exception as e:
+            logger.error(f"Failed to log parameters snapshot: {e}")
+    
     def log_memory_operation(
         self,
         operation: str,  # "store", "retrieve", "delete"
@@ -201,11 +292,11 @@ class AnalyticsManager:
             context_key: Context key involved
             success: Whether operation succeeded
         """
-        if not self.enabled or not self.run:
-            return
-        
         if operation == "store" and success:
             self.session_metrics["memory_stores"] += 1
+        
+        if not self.enabled or not self.run:
+            return
         
         try:
             wandb.log({
@@ -247,6 +338,7 @@ class AnalyticsManager:
     def finish(self):
         """Finish the WandB run and upload final metrics."""
         if not self.enabled or not self.run:
+            logger.info("WandB run finished (was disabled)")
             return
         
         try:

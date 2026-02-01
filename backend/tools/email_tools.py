@@ -9,6 +9,11 @@ from typing import Optional, List
 from langchain.tools import tool
 from loguru import logger
 
+# Import colorful logging
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logging_utils import log_tool_call, log_tool_result
+
 try:
     import resend
     RESEND_AVAILABLE = True
@@ -54,9 +59,12 @@ def send_email(
     Returns:
         Success message with email ID or error message
     """
-    logger.info(f"🔧 TOOL CALLED: send_email(to='{to}', subject='{subject}')")
+    log_tool_call("send_email", {"to": to, "subject": subject})
+    
     if not init_resend():
-        return "Error: Email service is not configured. Please set RESEND_API_KEY."
+        result = "Error: Email service is not configured. Please set RESEND_API_KEY."
+        log_tool_result("send_email", result, success=False)
+        return result
     
     try:
         # Parse recipients
@@ -81,13 +89,15 @@ def send_email(
         response = resend.Emails.send(params)
         
         email_id = response.get("id", "unknown")
-        logger.info(f"Sent email to {to}: {subject} (ID: {email_id})")
         
-        return f"Successfully sent email to {to}. Subject: '{subject}'. Email ID: {email_id}"
+        result = f"Successfully sent email to {to}. Subject: '{subject}'. Email ID: {email_id}"
+        log_tool_result("send_email", result, success=True)
+        return result
         
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
-        return f"Error sending email: {str(e)}"
+        result = f"Error sending email: {str(e)}"
+        log_tool_result("send_email", result, success=False)
+        return result
 
 
 @tool
@@ -109,7 +119,8 @@ def draft_email(
     Returns:
         Formatted draft email for review
     """
-    logger.info(f"🔧 TOOL CALLED: draft_email(to='{to}', subject='{subject}')")
+    log_tool_call("draft_email", {"to": to, "subject": subject})
+    
     sender = from_email or os.getenv("RESEND_FROM_EMAIL", "Zero Me <onboarding@resend.dev>")
     
     draft = f"""
@@ -124,6 +135,7 @@ Subject: {subject}
 This is a draft. Say "send it" to send, or ask me to modify it.
 """
     
+    log_tool_result("draft_email", f"Draft created for {to}", success=True)
     return draft
 
 
@@ -145,14 +157,17 @@ def check_email_status(email_id: str) -> str:
     Returns:
         Email status information
     """
-    logger.info(f"🔧 TOOL CALLED: check_email_status(email_id='{email_id}')")
+    log_tool_call("check_email_status", {"email_id": email_id})
+    
     if not init_resend():
-        return "Error: Email service is not configured. Please set RESEND_API_KEY."
+        result = "Error: Email service is not configured. Please set RESEND_API_KEY."
+        log_tool_result("check_email_status", result, success=False)
+        return result
     
     try:
         email = resend.Emails.get(email_id)
         
-        status = f"""
+        result = f"""
 Email Status:
 - ID: {email.get('id')}
 - To: {email.get('to')}
@@ -160,8 +175,10 @@ Email Status:
 - Status: {email.get('last_event', 'unknown')}
 - Created: {email.get('created_at')}
 """
-        return status
+        log_tool_result("check_email_status", f"Status: {email.get('last_event', 'unknown')}", success=True)
+        return result
         
     except Exception as e:
-        logger.error(f"Failed to get email status: {e}")
-        return f"Error checking email status: {str(e)}"
+        result = f"Error checking email status: {str(e)}"
+        log_tool_result("check_email_status", result, success=False)
+        return result

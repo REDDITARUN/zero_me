@@ -50,7 +50,7 @@ class MemoryManager:
     # PERSONAL CONTEXT OPERATIONS
     # ============================================
     
-    def store_context(self, user_id: str, context_key: str, context_value: str) -> bool:
+    def store_context(self, user_id: str, context_key: str, context_value: str, category: str = "general") -> bool:
         """
         Store a piece of personal context.
         
@@ -58,6 +58,7 @@ class MemoryManager:
             user_id: User identifier
             context_key: Key for the context (e.g., "preferred_name", "timezone")
             context_value: The context value
+            category: Category of context (e.g., "preferences", "work", "schedule")
             
         Returns:
             True if stored successfully
@@ -68,16 +69,17 @@ class MemoryManager:
         try:
             key = self._get_key(user_id, "context")
             
-            # Store with timestamp
+            # Store with timestamp and category
             data = {
                 "value": context_value,
+                "category": category,
                 "updated_at": datetime.utcnow().isoformat(),
             }
             
             self.client.hset(key, context_key, json.dumps(data))
             self.client.expire(key, timedelta(days=self.ttl_days))
             
-            logger.debug(f"Stored context for user {user_id}: {context_key}")
+            logger.debug(f"Stored context for user {user_id}: {context_key} (category: {category})")
             return True
         except Exception as e:
             logger.error(f"Failed to store context: {e}")
@@ -158,17 +160,21 @@ class MemoryManager:
     # CONVERSATION HISTORY OPERATIONS
     # ============================================
     
-    def store_conversation_summary(self, user_id: str, summary: Dict[str, Any]) -> bool:
+    def store_conversation_summary(
+        self, 
+        user_id: str, 
+        summary: Optional[Dict[str, Any]] = None,
+        topics: Optional[List[str]] = None,
+        duration: int = 0,
+    ) -> bool:
         """
         Store a conversation summary.
         
         Args:
             user_id: User identifier
-            summary: Conversation summary with keys like:
-                - topic: Main topic discussed
-                - key_points: List of key points
-                - questions_asked: Number of questions asked by bot
-                - timestamp: When the conversation occurred
+            summary: Conversation summary dict, or will be built from other params
+            topics: List of topics discussed
+            duration: Duration in seconds
         """
         if not self.client:
             return False
@@ -176,16 +182,43 @@ class MemoryManager:
         try:
             key = self._get_key(user_id, "conversations")
             
+            # Build summary if not provided
+            if summary is None:
+                summary = {}
+            
+            # Add/update fields
             summary["timestamp"] = summary.get("timestamp", datetime.utcnow().isoformat())
+            if topics:
+                summary["topics"] = topics
+            if duration:
+                summary["duration_seconds"] = duration
             
             self.client.lpush(key, json.dumps(summary))
             self.client.ltrim(key, 0, self.max_items - 1)  # Keep only recent
             self.client.expire(key, timedelta(days=self.ttl_days))
             
+            logger.debug(f"Stored conversation summary for user {user_id}")
             return True
         except Exception as e:
             logger.error(f"Failed to store conversation summary: {e}")
             return False
+    
+    async def store_conversation_summary_async(
+        self, 
+        user_id: str, 
+        summary: Optional[str] = None,
+        topics: Optional[List[str]] = None,
+        duration: int = 0,
+    ) -> bool:
+        """Async version of store_conversation_summary."""
+        # For now, just call the sync version
+        # In a production app, use aioredis
+        return self.store_conversation_summary(
+            user_id, 
+            {"summary": summary} if isinstance(summary, str) else summary,
+            topics,
+            duration
+        )
     
     def get_recent_conversations(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent conversation summaries."""

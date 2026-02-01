@@ -4,11 +4,16 @@ Tools for Doc, Todo, and Calendar operations using Notion API
 """
 
 import os
+import sys
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from langchain.tools import tool
 from loguru import logger
 import httpx
+
+# Import colorful logging
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from logging_utils import log_tool_call, log_tool_result
 
 try:
     from notion_client import Client as NotionClient
@@ -77,24 +82,27 @@ def create_notion_page(
     Args:
         title: The title of the page
         content: The content to add to the page (plain text)
-        parent_page_id: Optional parent page ID. If not provided, creates in workspace root.
+        parent_page_id: Optional parent page ID. If not provided, uses NOTION_DOC_PARENT from env.
     
     Returns:
         Success message with page ID or error message
     """
-    logger.info(f"🔧 TOOL CALLED: create_notion_page(title='{title}')")
+    log_tool_call("create_notion_page", {"title": title})
     client = get_notion_client()
     if not client:
-        return "Error: Notion is not configured. Please set NOTION_TOKEN."
+        result = "Error: Notion is not configured. Please set NOTION_TOKEN."
+        log_tool_result("create_notion_page", result, success=False)
+        return result
     
     try:
-        # Build parent reference
-        if parent_page_id:
-            parent = {"page_id": parent_page_id}
-        else:
-            # Search for a default "Documents" database or use workspace
-            # For simplicity, we'll create as a page (requires parent)
-            return "Error: parent_page_id is required. Please provide a Notion page ID to create the document under."
+        # Build parent reference - use env variable as default
+        actual_parent_id = parent_page_id or os.getenv("NOTION_DOC_PARENT")
+        if not actual_parent_id:
+            result = "Error: No parent page ID provided and NOTION_DOC_PARENT not set in environment."
+            log_tool_result("create_notion_page", result, success=False)
+            return result
+        
+        parent = {"page_id": actual_parent_id}
         
         # Create the page
         new_page = client.pages.create(
@@ -116,12 +124,14 @@ def create_notion_page(
         )
         
         page_id = new_page["id"]
-        logger.info(f"Created Notion page: {title} ({page_id})")
-        return f"Successfully created document '{title}'. Page ID: {page_id}"
+        result = f"Successfully created document '{title}'. Page ID: {page_id}"
+        log_tool_result("create_notion_page", result, success=True)
+        return result
         
     except Exception as e:
-        logger.error(f"Failed to create Notion page: {e}")
-        return f"Error creating document: {str(e)}"
+        result = f"Error creating document: {str(e)}"
+        log_tool_result("create_notion_page", result, success=False)
+        return result
 
 
 @tool
@@ -135,10 +145,12 @@ def read_notion_page(page_id: str) -> str:
     Returns:
         The page content or error message
     """
-    logger.info(f"🔧 TOOL CALLED: read_notion_page(page_id='{page_id}')")
+    log_tool_call("read_notion_page", {"page_id": page_id})
     client = get_notion_client()
     if not client:
-        return "Error: Notion is not configured. Please set NOTION_TOKEN."
+        result = "Error: Notion is not configured. Please set NOTION_TOKEN."
+        log_tool_result("read_notion_page", result, success=False)
+        return result
     
     try:
         # Get page metadata
@@ -190,7 +202,7 @@ def search_notion(query: str, filter_type: str = "page") -> str:
     Returns:
         List of matching pages or error message
     """
-    logger.info(f"🔧 TOOL CALLED: search_notion(query='{query}', filter_type='{filter_type}')")
+    log_tool_call("search_notion", {"query": query, "filter_type": filter_type})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -244,7 +256,7 @@ def add_todo(
     Returns:
         Success message or error
     """
-    logger.info(f"🔧 TOOL CALLED: add_todo(title='{title}', due_date='{due_date}')")
+    log_tool_call("add_todo", {"title": title, "due_date": due_date or "none"})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -303,7 +315,7 @@ def get_todos(
     Returns:
         List of todos or error message
     """
-    logger.info(f"🔧 TOOL CALLED: get_todos(status='{status}', limit={limit})")
+    log_tool_call("get_todos", {"status": status or "all", "limit": limit})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -373,7 +385,7 @@ def update_todo(
     Returns:
         Success message or error
     """
-    logger.info(f"🔧 TOOL CALLED: update_todo(page_id='{page_id}', status='{status}')")
+    log_tool_call("update_todo", {"page_id": page_id, "status": status or "unchanged"})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -436,7 +448,7 @@ def add_calendar_event(
     Returns:
         Success message or error
     """
-    logger.info(f"🔧 TOOL CALLED: add_calendar_event(title='{title}', start_date='{start_date}')")
+    log_tool_call("add_calendar_event", {"title": title, "date": start_date})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -496,7 +508,7 @@ def get_calendar_events(
     Returns:
         List of events or error message
     """
-    logger.info(f"🔧 TOOL CALLED: get_calendar_events(start='{start_date}', end='{end_date}')")
+    log_tool_call("get_calendar_events", {"start": start_date or "today", "end": end_date or "none"})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -576,7 +588,7 @@ def update_calendar_event(
     Returns:
         Success message or error
     """
-    logger.info(f"🔧 TOOL CALLED: update_calendar_event(page_id='{page_id}')")
+    log_tool_call("update_calendar_event", {"page_id": page_id})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."
@@ -620,7 +632,7 @@ def delete_calendar_event(page_id: str) -> str:
     Returns:
         Success message or error
     """
-    logger.info(f"🔧 TOOL CALLED: delete_calendar_event(page_id='{page_id}')")
+    log_tool_call("delete_calendar_event", {"page_id": page_id})
     client = get_notion_client()
     if not client:
         return "Error: Notion is not configured. Please set NOTION_TOKEN."

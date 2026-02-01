@@ -2,6 +2,8 @@
 Zero Me - Sub-Agents
 Individual agents for Doc, Todo, Email, and Calendar operations
 Using LangChain with Gemini models
+
+All agents have access to memory retrieval for user context.
 """
 
 import os
@@ -39,6 +41,24 @@ from tools.notion_tools import (
     delete_calendar_event,
 )
 from tools.email_tools import send_email, draft_email, check_email_status
+from tools.memory_tools import retrieve_memory, search_memory
+
+
+# Memory context addition to all agent prompts
+MEMORY_CONTEXT_PROMPT = """
+
+## User Memory Access
+You have access to the user's stored memories via these tools:
+- retrieve_memory: Get specific remembered info (e.g., preferred_name, email, preferences)
+- search_memory: Search for relevant memories by keyword
+
+ALWAYS check memory for relevant context before completing tasks. For example:
+- Before sending an email, check if you know the user's name to sign properly
+- Before creating a todo, check if there's related context
+- Use the user's preferred name if stored
+
+Example: If the task is "send email to boss", first search_memory("boss") to get their email address.
+"""
 
 
 def create_llm(config: dict) -> ChatGoogleGenerativeAI:
@@ -63,14 +83,17 @@ def create_agent_graph(
     """Create a langgraph react agent with the given LLM, tools, and prompt."""
     from langchain_core.messages import SystemMessage
     
+    # Add memory context to the system prompt
+    enhanced_prompt = system_prompt + MEMORY_CONTEXT_PROMPT
+    
     # Create react agent using langgraph with system message
     agent = create_react_agent(
         model=llm,
         tools=tools,
-        prompt=SystemMessage(content=system_prompt),
+        prompt=SystemMessage(content=enhanced_prompt),
     )
     
-    logger.info(f"Created {agent_name} with {len(tools)} tools")
+    logger.info(f"Created {agent_name} with {len(tools)} tools (including memory access)")
     return agent
 
 
@@ -88,6 +111,9 @@ class DocAgent:
             create_notion_page,
             read_notion_page,
             search_notion,
+            # Memory tools for context
+            retrieve_memory,
+            search_memory,
         ]
         self.agent = create_agent_graph(
             self.llm,
@@ -131,6 +157,9 @@ class TodoAgent:
             get_todos,
             update_todo,
             search_notion,  # For finding todos by name
+            # Memory tools for context
+            retrieve_memory,
+            search_memory,
         ]
         self.agent = create_agent_graph(
             self.llm,
@@ -172,6 +201,9 @@ class EmailAgent:
             send_email,
             draft_email,
             check_email_status,
+            # Memory tools for context
+            retrieve_memory,
+            search_memory,
         ]
         self.agent = create_agent_graph(
             self.llm,
@@ -215,6 +247,9 @@ class CalendarAgent:
             update_calendar_event,
             delete_calendar_event,
             search_notion,  # For finding events
+            # Memory tools for context
+            retrieve_memory,
+            search_memory,
         ]
         self.agent = create_agent_graph(
             self.llm,
