@@ -6,6 +6,7 @@
 # Env / secrets
 .env
 .env.*
+.env.local
 !.env.example
 
 # Logs
@@ -28,3 +29,9 @@ __pycache__/
 .venv/
 venv/
 
+# Electron
+out/
+release/
+
+
+noise_maker/

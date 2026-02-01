@@ -1,0 +1,23 @@
+/* BlobWindow - Transparent floating window */
+
+.blob-window {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  overflow: visible;
+  
+  /* Allow dragging the window by the blob */
+  -webkit-app-region: drag;
+}
+
+/* Ensure transparency works in Electron */
+html, body, #root {
+  background: transparent !important;
+}
+
+body.blob-mode {
+  background: transparent !important;
+}
