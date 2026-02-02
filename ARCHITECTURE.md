@@ -102,18 +102,33 @@ Zero Me is a multi-agent voice assistant system built with **Gemini LLMs** and *
 
 ## Layer Details
 
-### 1. Voice Agent Layer (Pipecat + Gemini Live)
+### 1. Voice Agent Layer (Pipecat + Gemini Live + Parallel Deepgram STT)
 
 **File:** `backend/bot.py`
 
-The voice layer uses **Pipecat** framework with **Gemini Live** for native speech-to-speech processing.
+The voice layer uses **Pipecat** framework with **Gemini Live** for native speech-to-speech processing, plus a **ParallelPipeline** with **Deepgram STT** for conversation transcription.
 
 | Component | Description |
 |-----------|-------------|
 | **GeminiLiveLLMService** | Native audio processing (STT + LLM + TTS in one) |
+| **DeepgramSTTService** | Parallel STT for capturing conversation transcripts |
+| **ParallelPipeline** | Runs Gemini Live and Deepgram STT branches simultaneously |
+| **TranscriptCaptureProcessor** | Captures transcriptions and stores in ConversationStore |
 | **Voice** | Puck (configurable: Charon, Kore, Fenrir, Aoede) |
 | **Transport** | Daily.co WebRTC or direct WebRTC |
 | **Function** | `delegate_task(task_description, task_type)` |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    PARALLEL PIPELINE                             │
+│   ┌─────────────────────────┬─────────────────────────────┐     │
+│   │  Branch 1: Main Flow    │  Branch 2: STT Capture      │     │
+│   │  ─────────────────────  │  ─────────────────────────  │     │
+│   │  RTVI                   │  DeepgramSTTService         │     │
+│   │  GeminiLiveLLMService   │  TranscriptCaptureProcessor │     │
+│   └─────────────────────────┴─────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 **Task Types:**
 - `todo` - Add, get, update, complete todos
@@ -146,6 +161,17 @@ delegate_to_todo_agent(task: str) -> str
 delegate_to_email_agent(task: str) -> str
 delegate_to_calendar_agent(task: str) -> str
 ```
+
+**Conversation Context Tools:**
+```python
+get_conversation_context(mode: str, last_n: int) -> str
+# mode: "full", "recent", "user_only", "summary"
+
+search_conversation(query: str) -> str
+# Search for specific content in the conversation
+```
+
+These tools provide access to the full conversation transcript captured by the parallel Deepgram STT service.
 
 **Routing Logic:**
 - Document requests → DocAgent
@@ -235,10 +261,12 @@ A background agent that improves personalization over time.
 1. **Context Memory Management** - Extract and store user preferences
 2. **Conversation Analytics** - Track questions asked, topics discussed
 3. **Parameter Optimization** - Suggest/apply changes to agent parameters
+4. **Voice Preference Detection** - Detect and apply voice speed preferences from conversation
 
 **Tools:**
 - Memory: `store_memory`, `retrieve_memory`, `search_memory`, `delete_memory`, `get_conversation_history`
 - Analytics: `log_metric`, `log_question_count`, `log_parameter_change`, `modify_agent_parameter`, `get_current_parameters`, `record_conversation_analytics`
+- Voice Control: `change_voice_speed`, `change_voice_style`, `get_available_voices`, `get_current_voice_settings`, `add_speaking_instruction`
 
 ---
 
@@ -322,6 +350,7 @@ MAIN_AGENT_CONFIG = {
 Required in `.env`:
 ```
 GOOGLE_API_KEY=         # Gemini API
+DEEPGRAM_API_KEY=       # Parallel STT for conversation transcription (optional but recommended)
 NOTION_API_KEY=         # Notion integration
 NOTION_DATABASE_ID=     # Notion todos database
 NOTION_CALENDAR_ID=     # Notion calendar database

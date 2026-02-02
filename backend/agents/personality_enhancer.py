@@ -57,6 +57,15 @@ from tools.prompt_tools import (
     update_agent_temperature,
     analyze_conversation_for_improvements,
 )
+from tools.voice_tools import (
+    change_voice_speed,
+    change_voice_style,
+    get_available_voices,
+    get_current_voice_settings,
+    add_speaking_instruction,
+    get_voice_manager,
+    detect_voice_preference,
+)
 
 
 class PersonalityEnhancerAgent:
@@ -125,7 +134,16 @@ class PersonalityEnhancerAgent:
             get_all_agent_configs,
             update_agent_temperature,
             analyze_conversation_for_improvements,
+            # Voice control tools
+            change_voice_speed,
+            change_voice_style,
+            get_available_voices,
+            get_current_voice_settings,
+            add_speaking_instruction,
         ]
+        
+        # Initialize voice manager reference
+        self.voice_manager = get_voice_manager()
         
         # Create the agent
         self.agent = self._create_agent()
@@ -401,6 +419,7 @@ Conversation ended:
         1. Extract personal preferences, habits, names, etc.
         2. Store them in Redis memory
         3. Log what was learned to WandB
+        4. Detect and apply voice preferences
         
         Args:
             conversation_text: The full conversation text
@@ -411,6 +430,27 @@ Conversation ended:
         """
         try:
             logger.info("🔍 Analyzing conversation for personal context...")
+            
+            # First, check for voice preferences in the conversation
+            voice_preferences_detected = []
+            for line in conversation_text.split('\n'):
+                if line.startswith('User:'):
+                    user_text = line.replace('User:', '').strip()
+                    preference = detect_voice_preference(user_text)
+                    if preference:
+                        voice_preferences_detected.append(preference)
+            
+            # Apply the most recent voice preference
+            voice_update_note = ""
+            if voice_preferences_detected:
+                latest_pref = voice_preferences_detected[-1]
+                logger.info(f"🎤 Detected voice preference in conversation: {latest_pref['preference']}")
+                result = self.voice_manager.change_voice(
+                    latest_pref['recommended_voice'],
+                    reason=f"conversation_analysis: {latest_pref['original_text'][:50]}"
+                )
+                if result["success"]:
+                    voice_update_note = f"\n\nVoice updated to {result['new_voice']} based on user preference for {latest_pref['preference']} speech."
             
             prompt = f"""
 Analyze this conversation and extract any personal context worth remembering:
@@ -424,15 +464,21 @@ For each piece of useful context you find:
    - "schedule_preference" (morning person, night owl, etc.)
    - "communication_style" (formal, casual, brief, detailed)
    - "interests" (hobbies, topics they enjoy)
+   - "voice_preference" (if they mentioned speaking faster/slower)
    - Any other relevant personal info
 
 2. After storing, log what you learned using log_metric tool
+
+3. If the user expressed any preference about how you speak (faster, slower, tone, etc.):
+   - Use change_voice_speed or change_voice_style to adjust
+   - Use add_speaking_instruction for tone/style preferences
 
 IMPORTANT:
 - Only store genuinely useful context
 - Don't store sensitive info (passwords, financial)
 - Use descriptive keys
 - Store even small preferences (coffee preference, favorite color, etc.)
+- Pay special attention to voice/speech preferences
 
 After storing everything, provide a brief summary of what you learned about the user.
 """
@@ -443,9 +489,10 @@ After storing everything, provide a brief summary of what you learned about the 
             ai_messages = [m for m in result.get("messages", []) if hasattr(m, "type") and m.type == "ai"]
             if ai_messages:
                 learned = ai_messages[-1].content if hasattr(ai_messages[-1], "content") else str(ai_messages[-1])
+                learned += voice_update_note
                 logger.info(f"📚 Learned: {learned[:200]}...")
                 return learned
-            return "Analysis completed."
+            return "Analysis completed." + voice_update_note
             
         except Exception as e:
             logger.error(f"Error analyzing conversation: {e}")

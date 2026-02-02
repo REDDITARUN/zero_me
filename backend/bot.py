@@ -7,28 +7,120 @@ The voice agent has tools for:
 1. delegate_task - routes to sub-agents for complex tasks
 2. remember_info - quick memory storage
 3. recall_info - quick memory retrieval
+
+PARALLEL STT PIPELINE:
+Additionally uses a ParallelPipeline to run Deepgram STT alongside the main
+Gemini Live pipeline. This captures user speech as text transcriptions which
+can be accessed by agents via the get_conversation_context tool.
 """
 import os
 import asyncio
+from datetime import datetime
 
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
+from pipecat.processors.frame_processor import FrameProcessor, FrameDirection
+from pipecat.frames.frames import Frame, TranscriptionFrame, TextFrame
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.google.gemini_live import GeminiLiveLLMService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
+# Import conversation context store
+from tools.context_tools import get_conversation_store
+
+# Import voice control tools
+from tools.voice_tools import (
+    get_voice_manager,
+    detect_voice_preference,
+    VOICE_PROFILES,
+)
+
 # Load environment variables
 load_dotenv(override=True)
+
+
+# ============================================
+# TRANSCRIPT CAPTURE PROCESSOR
+# ============================================
+
+class TranscriptCaptureProcessor(FrameProcessor):
+    """
+    Custom frame processor that captures transcription frames from Deepgram STT
+    and stores them in the global ConversationStore.
+    
+    This processor runs in a parallel branch alongside the main Gemini Live pipeline.
+    It captures user speech transcriptions for later access by agents.
+    Also detects voice preference requests (speak faster/slower) from transcripts.
+    """
+    
+    def __init__(self, voice_change_callback=None, **kwargs):
+        super().__init__(**kwargs)
+        self.store = get_conversation_store()
+        self.voice_manager = get_voice_manager()
+        self._current_transcript = ""
+        self._voice_change_callback = voice_change_callback
+        logger.info("📝 TranscriptCaptureProcessor initialized")
+    
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and capture transcriptions."""
+        await super().process_frame(frame, direction)
+        
+        # Capture transcription frames from Deepgram STT
+        if isinstance(frame, TranscriptionFrame):
+            text = frame.text if hasattr(frame, 'text') else str(frame)
+            is_final = getattr(frame, 'is_final', True)
+            
+            if text and text.strip():
+                self.store.add_user_transcript(
+                    text=text,
+                    timestamp=datetime.utcnow(),
+                    is_final=is_final
+                )
+                
+                if is_final:
+                    logger.debug(f"🎤 Captured user transcript: {text[:50]}...")
+                    
+                    # Detect voice preference changes from the transcript
+                    preference = detect_voice_preference(text)
+                    if preference:
+                        logger.info(f"🎤 Detected voice preference: {preference['preference']}")
+                        new_voice = preference['recommended_voice']
+                        result = self.voice_manager.change_voice(
+                            new_voice,
+                            reason=f"user_said: {text[:50]}"
+                        )
+                        if result["success"]:
+                            logger.info(f"🔊 Auto-changed voice to {new_voice} based on user request")
+                            # Broadcast the change
+                            try:
+                                from tool_status import get_tool_status_broadcaster
+                                broadcaster = get_tool_status_broadcaster()
+                                broadcaster.broadcast_event({
+                                    "type": "voice_change",
+                                    "data": {
+                                        "old_voice": result["old_voice"],
+                                        "new_voice": result["new_voice"],
+                                        "pace": result["new_pace"],
+                                        "reason": preference["preference"],
+                                    }
+                                })
+                            except Exception as e:
+                                logger.debug(f"Broadcast failed: {e}")
+        
+        # Pass the frame downstream
+        await self.push_frame(frame, direction)
 
 # Import parameters from centralized config
 from parameters import VOICE_AGENT_SYSTEM_PROMPT, VOICE_AGENT_CONFIG
@@ -465,25 +557,42 @@ IMPORTANT:
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    """Main bot logic - runs the voice assistant pipeline"""
+    """Main bot logic - runs the voice assistant pipeline with parallel STT"""
     logger.info("Starting bot")
 
-    # Check for required API key
+    # Check for required API keys
     google_api_key = os.getenv("GOOGLE_API_KEY")
     if not google_api_key:
         logger.error("GOOGLE_API_KEY not found in environment")
         raise ValueError("GOOGLE_API_KEY is required")
+    
+    deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
+    if not deepgram_api_key:
+        logger.warning("⚠️ DEEPGRAM_API_KEY not found - conversation transcription will be limited")
 
     # Initialize the voice-agent bridge
     voice_bridge.initialize()
+    
+    # Initialize the conversation store for this session
+    conversation_store = get_conversation_store()
+    
+    # Initialize voice manager for dynamic voice control
+    voice_manager = get_voice_manager()
+    
+    # Get current voice from manager (may be different from config if changed)
+    current_voice = voice_manager.current_voice_id
 
     # Gemini Live - Native speech-to-speech LLM with function calling
     llm = GeminiLiveLLMService(
         api_key=google_api_key,
         system_instruction=ENHANCED_SYSTEM_PROMPT,
-        voice_id=VOICE_AGENT_CONFIG.get("voice_id", "Puck"),
+        voice_id=current_voice,  # Use voice from manager
         tools=tools,  # Pass the tools schema for function calling
     )
+    
+    # Store LLM reference for potential voice changes (note: Gemini Live may not support mid-session voice changes)
+    # The voice change will take effect on next session
+    logger.info(f"🎤 Current voice: {current_voice} ({VOICE_PROFILES.get(current_voice, {}).get('style', 'Unknown')})")
     
     logger.info("🔧 Tools configured:")
     logger.info("   1. delegate_task → routes to Todo, Calendar, Doc, Email agents")
@@ -629,14 +738,61 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # RTVI processor for frontend state communication
     rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
-
-    # Pipeline: audio in -> RTVI -> Gemini Live (STT+LLM+TTS with tools) -> audio out
-    pipeline = Pipeline([
-        transport.input(),
-        rtvi,
-        llm,
-        transport.output(),
-    ])
+    
+    # Create the transcript capture processor for the parallel branch
+    transcript_capture = TranscriptCaptureProcessor()
+    
+    # Create Deepgram STT service for parallel transcription (if API key available)
+    deepgram_stt = None
+    if deepgram_api_key:
+        try:
+            from deepgram import LiveOptions
+            
+            live_options = LiveOptions(
+                model="nova-2",
+                language="en-US",
+                interim_results=True,  # Get real-time interim results
+                smart_format=True,     # Add punctuation
+                punctuate=True,
+                profanity_filter=False,
+                vad_events=False,      # We use pipeline VAD instead
+            )
+            
+            deepgram_stt = DeepgramSTTService(
+                api_key=deepgram_api_key,
+                live_options=live_options,
+            )
+            logger.info("✅ Deepgram STT service initialized for parallel transcription")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize Deepgram STT: {e}")
+            deepgram_stt = None
+    
+    # Build the pipeline with optional parallel STT branch
+    if deepgram_stt:
+        # ParallelPipeline: Main Gemini Live branch + Parallel Deepgram STT branch
+        # Both branches receive audio input simultaneously
+        logger.info("🔀 Creating ParallelPipeline with Deepgram STT transcription branch")
+        
+        pipeline = Pipeline([
+            transport.input(),
+            ParallelPipeline(
+                # Branch 1: Main conversation flow (Gemini Live handles STT+LLM+TTS)
+                [rtvi, llm],
+                # Branch 2: Parallel Deepgram STT for transcript capture
+                [deepgram_stt, transcript_capture],
+            ),
+            transport.output(),
+        ])
+    else:
+        # Fallback: Simple pipeline without parallel STT (Gemini Live only)
+        logger.info("📝 Using simple pipeline (Gemini Live only, no parallel STT)")
+        
+        pipeline = Pipeline([
+            transport.input(),
+            rtvi,
+            llm,
+            transport.output(),
+        ])
 
     task = PipelineTask(
         pipeline,
@@ -651,6 +807,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info("Client connected")
         voice_bridge.start_conversation()
+        # Start a new session in the conversation store
+        conversation_store.start_session(voice_bridge.conversation_id)
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
@@ -673,7 +831,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     logger.info("🎙️ Bot running with Gemini Live + Function Calling")
-    logger.info("📋 Tools: delegate_task, remember_info, recall_info")
+    logger.info("📋 Tools: delegate_task, remember_info, recall_info, see_screen")
+    if deepgram_stt:
+        logger.info("🔀 Parallel STT: Deepgram transcription active - conversation context available")
     await runner.run(task)
     logger.info("Bot finished")
 

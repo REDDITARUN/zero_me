@@ -10,12 +10,47 @@ WandB tracks changes to these parameters over time.
 # VOICE AGENT PARAMETERS
 # ============================================
 
+# Available voices grouped by speaking pace
+AVAILABLE_VOICES = {
+    "fast": ["Puck", "Fenrir", "Laomedeia"],
+    "moderate": ["Charon", "Kore", "Algieba", "Despina"],
+    "slow": ["Enceladus", "Aoede", "Gacrux", "Achernar"],
+}
+
 VOICE_AGENT_CONFIG = {
     "name": "Casey",
-    "voice_id": "Puck",  # Options: Puck, Charon, Kore, Fenrir, Aoede
+    "voice_id": "Puck",  # Options: Puck, Charon, Kore, Fenrir, Aoede, Enceladus, etc.
     "temperature": 0.7,
     "max_tokens": 1024,
 }
+
+# Dynamic voice state (can be modified at runtime)
+_dynamic_voice_state = {
+    "current_voice_id": "Puck",
+    "current_pace": "fast",
+    "custom_prompt_additions": [],
+}
+
+
+def get_current_voice_id() -> str:
+    """Get the current voice ID (may differ from config if changed dynamically)."""
+    return _dynamic_voice_state.get("current_voice_id", VOICE_AGENT_CONFIG["voice_id"])
+
+
+def set_current_voice_id(voice_id: str) -> bool:
+    """Set the current voice ID dynamically."""
+    _dynamic_voice_state["current_voice_id"] = voice_id
+    # Determine pace from voice
+    for pace, voices in AVAILABLE_VOICES.items():
+        if voice_id in voices:
+            _dynamic_voice_state["current_pace"] = pace
+            break
+    return True
+
+
+def get_dynamic_voice_state() -> dict:
+    """Get the full dynamic voice state."""
+    return _dynamic_voice_state.copy()
 
 VOICE_AGENT_SYSTEM_PROMPT = """You are Casey, a friendly and reliable voice assistant for Zero Me.
 
@@ -81,11 +116,23 @@ You orchestrate task completion and return results.
 3. **email_agent**: Handles email operations (send, read emails via Resend)
 4. **calendar_agent**: Handles calendar operations (add, modify, remove events in Notion)
 
+# Conversation Context Tools
+You have access to the full conversation transcript via these tools:
+- **get_conversation_context**: Get the full conversation history
+  - mode="full" for entire transcript
+  - mode="recent" for last N messages
+  - mode="user_only" for just user messages
+  - mode="summary" for session statistics
+- **search_conversation**: Search for specific content in the conversation
+
+Use these tools when you need context about what was discussed earlier.
+
 # Task Routing Rules
 - Document requests → doc_agent
 - Todo/task requests → todo_agent
 - Email requests → email_agent
 - Calendar/schedule requests → calendar_agent
+- Context/history questions → use get_conversation_context
 - Complex requests may need multiple agents - execute sequentially
 
 # Response Format

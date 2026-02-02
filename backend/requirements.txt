@@ -2,12 +2,15 @@
 # CORE - Pipecat Voice Pipeline
 # ============================================
 
-# Pipecat core framework with Google Gemini Live and Silero VAD
+# Pipecat core framework with Google Gemini Live, Silero VAD, and Deepgram STT
 # The base pipecat-ai package includes runner utilities for Pipecat Cloud
-pipecat-ai[google,silero]>=0.0.100
+pipecat-ai[google,silero,deepgram]>=0.0.100
 
 # Daily transport for WebRTC audio
 pipecat-ai[daily]>=0.0.100
+
+# Deepgram SDK for parallel STT transcription
+deepgram-sdk>=3.0.0
 
 # Environment management
 python-dotenv>=1.0.0

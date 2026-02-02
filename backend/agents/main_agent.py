@@ -2,6 +2,9 @@
 Zero Me - Main Dispatcher Agent
 Routes tasks to appropriate sub-agents
 Using LangChain with Gemini models
+
+Includes access to conversation context via the get_conversation_context tool,
+which provides the full transcript captured by the parallel Deepgram STT service.
 """
 
 import os
@@ -18,6 +21,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from parameters import MAIN_AGENT_CONFIG, MAIN_AGENT_SYSTEM_PROMPT
 from analytics import get_analytics_manager, weave_op, trace_agent_delegation
+
+# Import conversation context tools
+from tools.context_tools import get_conversation_context, search_conversation
 
 # Import sub-agents
 from agents.sub_agents import (
@@ -236,6 +242,9 @@ class MainDispatcherAgent:
             delegate_to_todo_agent,
             delegate_to_email_agent,
             delegate_to_calendar_agent,
+            # Conversation context tools (from parallel Deepgram STT)
+            get_conversation_context,
+            search_conversation,
         ]
     
     def _create_agent(self):

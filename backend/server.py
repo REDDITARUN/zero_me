@@ -26,8 +26,26 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from tool_status import get_tool_status_broadcaster
+from tools.voice_tools import get_voice_manager, VOICE_PROFILES, PACE_TO_VOICES
+from pydantic import BaseModel
 
 load_dotenv(".env.local")
+
+
+# Request models for voice settings
+class VoiceChangeRequest(BaseModel):
+    voice_id: str
+    reason: str = "manual_ui_change"
+
+
+class PaceChangeRequest(BaseModel):
+    pace: str  # "fast", "moderate", "slow"
+    reason: str = "manual_ui_change"
+
+
+class PromptInstructionRequest(BaseModel):
+    instruction: str
+    category: str = "speaking_style"
 
 app = FastAPI(title="Zero Me - Local Development Server")
 
@@ -264,6 +282,95 @@ async def get_recent_calls():
     return broadcaster.get_recent_calls(20)
 
 
+# ============================================
+# VOICE SETTINGS ENDPOINTS
+# ============================================
+
+@app.get("/voice/settings")
+async def get_voice_settings():
+    """Get current voice settings."""
+    manager = get_voice_manager()
+    settings = manager.get_current_settings()
+    settings["available_voices"] = VOICE_PROFILES
+    settings["pace_options"] = PACE_TO_VOICES
+    return settings
+
+
+@app.post("/voice/change")
+async def change_voice(request: VoiceChangeRequest):
+    """Change the voice to a specific voice ID."""
+    manager = get_voice_manager()
+    result = manager.change_voice(request.voice_id, request.reason)
+    
+    if result["success"]:
+        # Broadcast the change
+        try:
+            broadcaster = get_tool_status_broadcaster()
+            broadcaster.broadcast_event({
+                "type": "voice_change",
+                "data": result
+            })
+        except Exception as e:
+            logger.debug(f"Broadcast failed: {e}")
+    
+    return result
+
+
+@app.post("/voice/pace")
+async def change_pace(request: PaceChangeRequest):
+    """Change voice based on pace preference (fast/moderate/slow)."""
+    manager = get_voice_manager()
+    result = manager.change_pace(request.pace, request.reason)
+    
+    if result["success"]:
+        # Broadcast the change
+        try:
+            broadcaster = get_tool_status_broadcaster()
+            broadcaster.broadcast_event({
+                "type": "voice_change",
+                "data": result
+            })
+        except Exception as e:
+            logger.debug(f"Broadcast failed: {e}")
+    
+    return result
+
+
+@app.post("/voice/instruction")
+async def add_instruction(request: PromptInstructionRequest):
+    """Add a custom speaking instruction."""
+    manager = get_voice_manager()
+    result = manager.add_prompt_instruction(request.instruction, request.category)
+    
+    if result["success"]:
+        # Broadcast the change
+        try:
+            broadcaster = get_tool_status_broadcaster()
+            broadcaster.broadcast_event({
+                "type": "prompt_update",
+                "data": result
+            })
+        except Exception as e:
+            logger.debug(f"Broadcast failed: {e}")
+    
+    return result
+
+
+@app.delete("/voice/instructions")
+async def clear_instructions():
+    """Clear all custom speaking instructions."""
+    manager = get_voice_manager()
+    result = manager.clear_custom_instructions()
+    return result
+
+
+@app.get("/voice/history")
+async def get_voice_history():
+    """Get voice change history."""
+    manager = get_voice_manager()
+    return {"history": manager.change_history}
+
+
 @app.get("/")
 async def root():
     """Root endpoint with API info"""
@@ -278,6 +385,12 @@ async def root():
             "/status/architecture": "GET - Agent architecture config",
             "/status/stats": "GET - Current session stats",
             "/status/recent": "GET - Recent tool calls",
+            "/voice/settings": "GET - Current voice settings",
+            "/voice/change": "POST - Change voice ID",
+            "/voice/pace": "POST - Change voice pace (fast/moderate/slow)",
+            "/voice/instruction": "POST - Add speaking instruction",
+            "/voice/instructions": "DELETE - Clear instructions",
+            "/voice/history": "GET - Voice change history",
         }
     }
 

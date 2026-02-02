@@ -1,5 +1,6 @@
 import { useAgent, AgentStatus } from '../context/AgentContext';
 import ArchitecturePanel from './ArchitecturePanel';
+import VoiceControlPanel from './VoiceControlPanel';
 import './Dashboard.css';
 
 // Integration status (connected to actual services)
@@ -98,6 +99,13 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+        </section>
+
+        {/* Voice Control Section */}
+        <section className="section">
+          <h2 className="section-title">Voice Settings</h2>
+          <p className="section-subtitle">Control speaking pace and style</p>
+          <VoiceControlPanel />
         </section>
       </main>
 
